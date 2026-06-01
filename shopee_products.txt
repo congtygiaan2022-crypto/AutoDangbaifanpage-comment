@@ -1,0 +1,11 @@
+# File danh sách sản phẩm Shopee
+# Định dạng mỗi dòng: số_thứ_tự|tên_sản_phẩm|url_shopee
+# Dòng bắt đầu bằng # là comment, bỏ qua
+# -------------------------------------------------------------------
+# Ví dụ mẫu - hãy thay thế bằng sản phẩm thực của bạn:
+
+1|Áo thun nam cao cấp form rộng|https://shopee.vn/product/123456/ao-thun-nam
+2|Quần jogger nữ thể thao|https://shopee.vn/product/234567/quan-jogger-nu
+3|Giày sneaker unisex hot trend|https://shopee.vn/product/345678/giay-sneaker
+4|Túi tote vải canvas in hình|https://shopee.vn/product/456789/tui-tote-canvas
+5|Mũ bucket chống nắng thời trang|https://shopee.vn/product/567890/mu-bucket

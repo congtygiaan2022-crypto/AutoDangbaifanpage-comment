@@ -1,0 +1,31 @@
+# --- Dữ liệu cục bộ của từng máy (Không đẩy lên Git để tránh đè dữ liệu của khách) ---
+database.json
+system.db
+comment_history.json
+logs.json
+loi_done.txt
+thongke_ngay.txt
+update_error.txt
+
+# --- Các tệp tin đóng gói update cũ ---
+update.zip
+update_temp.zip
+version.json
+current_version.json
+
+# --- Tệp tin tạm của Python và hệ thống ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.idea/
+.vscode/
+
+# --- Ảnh chụp màn hình và log debug ---
+debug_*.png
+debug_*.html
+job_*.json
+
+# --- Thư mục chứa video tải về/đăng bài (nếu có) ---
+downloads/
+videos/
