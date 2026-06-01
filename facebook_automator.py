@@ -29,6 +29,21 @@ class FacebookAutomator:
             self.driver.set_page_load_timeout(60)
             self.driver.set_script_timeout(60)
             self.driver.implicitly_wait(2)
+
+            # Close other tabs to prevent tab confusion and save memory
+            try:
+                handles = self.driver.window_handles
+                if len(handles) > 1:
+                    current_handle = self.driver.current_window_handle
+                    for h in handles:
+                        if h != current_handle:
+                            try:
+                                self.driver.switch_to.window(h)
+                                self.driver.close()
+                            except: pass
+                    self.driver.switch_to.window(current_handle)
+            except Exception as tab_e:
+                print(f"Error cleaning up tabs: {tab_e}")
         except Exception as e:
             print(f"Error connecting to browser: {e}")
             raise e

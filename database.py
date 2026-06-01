@@ -115,6 +115,10 @@ class Database:
                     data['shopee_mode'] = False
                 if 'shopee_file' not in data:
                     data['shopee_file'] = ''
+                if 'shopee_all_groups' not in data:
+                    data['shopee_all_groups'] = True
+                if 'shopee_groups' not in data:
+                    data['shopee_groups'] = []
                 
                 for page in data.get('fanpages', []):
                     if 'group_id' not in page:
@@ -137,6 +141,7 @@ class Database:
                 "time_start": "00:00", "time_end": "23:59", "theme": "dark", "run_mode": "post_and_comment",
                 "max_parallel_workers": 1, "groups": [],
                 "shopee_mode": False, "shopee_file": "",
+                "shopee_all_groups": True, "shopee_groups": [],
                 "browsers": [
                     {
                         "id": "gemlogin_default",
@@ -267,6 +272,20 @@ class Database:
 
     def set_shopee_file(self, path):
         self.data['shopee_file'] = path
+        self.save()
+
+    def get_shopee_all_groups(self):
+        return self.data.get('shopee_all_groups', True)
+
+    def set_shopee_all_groups(self, val):
+        self.data['shopee_all_groups'] = bool(val)
+        self.save()
+
+    def get_shopee_groups(self):
+        return self.data.get('shopee_groups', [])
+
+    def set_shopee_groups(self, groups_list):
+        self.data['shopee_groups'] = list(groups_list)
         self.save()
 
     def add_fanpage(self, link, save=True):

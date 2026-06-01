@@ -209,6 +209,30 @@ class App(tk.Tk):
             command=on_shopee_toggle, cursor="hand2")
         self.chk_shopee.pack(anchor="w", padx=5)
 
+        # Row for Shopee Groups selection
+        shopee_group_row = tk.Frame(shopee_frame, bg="#f8f9fa")
+        shopee_group_row.pack(fill="x", padx=5, pady=(0, 3))
+        
+        tk.Label(shopee_group_row, text="Nhóm áp dụng:", bg="#f8f9fa", font=("Arial", 8, "bold")).pack(side="left")
+        
+        self.shopee_all_groups_var = tk.BooleanVar(value=self.db.get_shopee_all_groups())
+        self.shopee_group_vars = {}
+        
+        self.btn_shopee_groups = tk.Menubutton(
+            shopee_group_row, text="Đang tải...",
+            relief="raised", bd=1, bg="#ffffff", cursor="hand2", font=("Arial", 8)
+        )
+        self.btn_shopee_groups.pack(side="left", padx=5)
+        
+        self.shopee_group_menu = tk.Menu(
+            self.btn_shopee_groups, tearoff=0,
+            postcommand=self.rebuild_shopee_group_menu
+        )
+        self.btn_shopee_groups["menu"] = self.shopee_group_menu
+        
+        # Initialize button text
+        self.update_shopee_groups_button_text()
+
         shopee_file_row = tk.Frame(shopee_frame, bg="#f8f9fa")
         shopee_file_row.pack(fill="x", padx=5, pady=(0, 3))
 
@@ -383,7 +407,7 @@ class App(tk.Tk):
         btn.bind("<Leave>", on_leave)
 
     def _update_shopee_ui_state(self):
-        """Dim/enable the file-picker row based on shopee checkbox state."""
+        """Dim/enable the file-picker and group-picker based on shopee checkbox state."""
         try:
             enabled = self.shopee_mode_var.get()
             state = "normal" if enabled else "disabled"
@@ -391,8 +415,116 @@ class App(tk.Tk):
             self._shopee_file_btn.configure(state=state)
             self._shopee_open_btn.configure(state=state)
             self.lbl_shopee_file.configure(fg=fg if enabled else "#aaa")
+            if hasattr(self, 'btn_shopee_groups') and self.btn_shopee_groups.winfo_exists():
+                self.btn_shopee_groups.configure(state=state)
         except Exception:
             pass
+
+    def update_shopee_groups_button_text(self):
+        groups = self.db.get_groups()
+        if not groups:
+            self.btn_shopee_groups.configure(text="Không có nhóm ▼")
+            return
+            
+        all_groups = self.shopee_all_groups_var.get()
+        if all_groups:
+            self.btn_shopee_groups.configure(text="Tất cả nhóm ▼")
+        else:
+            checked_groups = [g for g in groups if self.shopee_group_vars.get(g['id']) and self.shopee_group_vars[g['id']].get()]
+            self.btn_shopee_groups.configure(text=f"Đã chọn {len(checked_groups)} nhóm ▼")
+
+    def rebuild_shopee_group_menu(self):
+        self.shopee_group_menu.delete(0, "end")
+        groups = self.db.get_groups()
+        
+        if not groups:
+            self.shopee_group_menu.add_command(label="(Chưa có nhóm nào)", state="disabled")
+            self.shopee_all_groups_var.set(True)
+            self.db.set_shopee_all_groups(True)
+            self.db.set_shopee_groups([])
+            self.update_shopee_groups_button_text()
+            return
+
+        db_all = self.db.get_shopee_all_groups()
+        db_selected = self.db.get_shopee_groups()
+        
+        self.shopee_all_groups_var.set(db_all)
+        
+        for g in groups:
+            g_id = g['id']
+            if g_id not in self.shopee_group_vars:
+                val = db_all or (g_id in db_selected)
+                self.shopee_group_vars[g_id] = tk.BooleanVar(value=val)
+            else:
+                val = db_all or (g_id in db_selected)
+                self.shopee_group_vars[g_id].set(val)
+
+        self.shopee_group_menu.add_checkbutton(
+            label="Áp dụng tất cả group fanpage",
+            variable=self.shopee_all_groups_var,
+            command=lambda: self.on_shopee_group_toggled("all")
+        )
+        
+        self.shopee_group_menu.add_separator()
+        
+        for g in groups:
+            g_id = g['id']
+            g_name = g['name']
+            self.shopee_group_menu.add_checkbutton(
+                label=g_name,
+                variable=self.shopee_group_vars[g_id],
+                command=lambda gid=g_id: self.on_shopee_group_toggled(gid)
+            )
+
+    def on_shopee_group_toggled(self, target):
+        groups = self.db.get_groups()
+        if not groups:
+            self.shopee_all_groups_var.set(True)
+            self.db.set_shopee_all_groups(True)
+            self.db.set_shopee_groups([])
+            self.update_shopee_groups_button_text()
+            return
+            
+        all_checked = self.shopee_all_groups_var.get()
+        
+        if target == "all":
+            if all_checked:
+                for g in groups:
+                    g_id = g['id']
+                    if g_id in self.shopee_group_vars:
+                        self.shopee_group_vars[g_id].set(True)
+            else:
+                # If unchecked "Apply all", keep all group checkboxes checked, 
+                # so the user can then start deselecting individual ones.
+                for g in groups:
+                    g_id = g['id']
+                    if g_id in self.shopee_group_vars:
+                        self.shopee_group_vars[g_id].set(True)
+        else:
+            checked_count = sum(1 for g in groups if self.shopee_group_vars.get(g['id']) and self.shopee_group_vars[g['id']].get())
+            
+            if checked_count == 0:
+                # Revert unchecking because absolutely at least one must be checked!
+                if target in self.shopee_group_vars:
+                    self.shopee_group_vars[target].set(True)
+                messagebox.showwarning("Cảnh báo", "Bạn phải chọn ít nhất 1 nhóm hoặc áp dụng tất cả!")
+            else:
+                if checked_count == len(groups):
+                    self.shopee_all_groups_var.set(True)
+                else:
+                    self.shopee_all_groups_var.set(False)
+                    
+        db_all = self.shopee_all_groups_var.get()
+        self.db.set_shopee_all_groups(db_all)
+        
+        db_selected = []
+        if not db_all:
+            db_selected = [g['id'] for g in groups if self.shopee_group_vars.get(g['id']) and self.shopee_group_vars[g['id']].get()]
+        else:
+            db_selected = [g['id'] for g in groups]
+            
+        self.db.set_shopee_groups(db_selected)
+        self.update_shopee_groups_button_text()
 
     @staticmethod
     def parse_shopee_file(filepath):
@@ -1769,6 +1901,7 @@ class App(tk.Tk):
                         profile_groups[key]['pages'].append({
                             'name': page.get('name'),
                             'link': page.get('link'),
+                            'group_id': page.get('group_id', ''),
                             'folders': folders,
                             'unposted_files': unposted_files,
                             'to_comment_historic': to_comment_historic,
@@ -1782,11 +1915,23 @@ class App(tk.Tk):
                         # Không trùng STT trong cùng 1 fanpage,
                         # nhưng fanpage khác dùng lại thoải mái.
                         if shopee_mode and shopee_products:
+                            shopee_all_groups = self.db.get_shopee_all_groups()
+                            shopee_active_groups = self.db.get_shopee_groups()
+                            
                             for key in profile_groups:
                                 for pdata in profile_groups[key]['pages']:
+                                    p_group_id = pdata.get('group_id', '')
+                                    is_applied = False
+                                    if shopee_all_groups:
+                                        is_applied = bool(p_group_id)
+                                    else:
+                                        is_applied = bool(p_group_id and p_group_id in shopee_active_groups)
+                                        
                                     unposted = pdata.get('unposted_files', [])
-                                    if not unposted:
+                                    if not unposted or not is_applied:
                                         pdata['shopee_assignment'] = {}
+                                        if not is_applied:
+                                            self.log(f"[Shopee] [{pdata['name']}] Bỏ qua rải link do nhóm '{p_group_id or '(Không nhóm)'}' không thuộc diện áp dụng.")
                                         continue
 
                                     # Shuffle toàn bộ pool cho fanpage này
