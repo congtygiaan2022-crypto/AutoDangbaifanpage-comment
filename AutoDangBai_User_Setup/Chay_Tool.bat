@@ -3,7 +3,7 @@ chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 
 echo ====================================================
-echo   ĐANG TỰ ĐỘNG ĐỒNG BỘ VÀ TẢI PHẦN MỀM MỚI TINH...
+echo   DANG TU DONG DONG BO VA TAI PHAN MEM MOI TINH...
 echo ====================================================
 echo.
 
@@ -12,11 +12,11 @@ python launcher_git.py
 if %errorlevel% neq 0 (
     echo.
     echo ====================================================
-    echo   [LỖI] Không thể khởi chạy Tool.
-    echo   Vui lòng kiểm tra:
-    echo   1. Máy tính đã cài đặt Python (tích chọn Add to PATH) chưa.
-    echo   2. Máy tính đã cài đặt phần mềm Git chưa.
-    echo   3. Đã chạy file 'Cai_Dat_Thu_Vien.bat' trước đó chưa.
+    echo   [LOI] Khong the khoi chay Tool.
+    echo   Vui long kiem tra:
+    echo   1. May tinh da cai dat Python (tich chon Add to PATH) chua.
+    echo   2. May tinh da cai dat phan mem Git chua.
+    echo   3. Da chay file 'Cai_Dat_Thu_Vien.bat' truoc do chua.
     echo ====================================================
     echo.
     pause

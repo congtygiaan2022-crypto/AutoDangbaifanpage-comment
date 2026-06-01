@@ -3,7 +3,7 @@ chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 
 echo ====================================================
-echo   ĐANG TỰ ĐỘNG CÀI ĐẶT CÁC THƯ VIỆN BẮT BUỘC...
+echo   DANG TU DONG CAI DAT CAC THU VIEN BAT BUOC...
 echo ====================================================
 echo.
 
@@ -12,13 +12,13 @@ pip install -r requirements.txt
 echo.
 if %errorlevel% equ 0 (
     echo ====================================================
-    echo   CÀI ĐẶT THƯ VIỆN THÀNH CÔNG!
-    echo   Bây giờ bạn có thể mở file 'Chay_Tool.bat' để chạy ứng dụng.
+    echo   CAI DAT THU VIEN THANH CONG!
+    echo   Bay gio ban co the mo file 'Chay_Tool.bat' de chay ung dung.
     echo ====================================================
 ) else (
     echo ====================================================
-    echo   [LỖI] Cài đặt thư viện thất bại.
-    echo   Vui lòng kiểm tra xem bạn đã cài đặt Python (tích chọn Add to PATH) chưa.
+    echo   [LOI] Cai dat thu vien that bai.
+    echo   Vui long kiem tra xem ban da cai dat Python (tich chon Add to PATH) chua.
     echo ====================================================
 )
 
