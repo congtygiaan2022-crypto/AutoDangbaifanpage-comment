@@ -6,21 +6,21 @@ echo ====================================================
 echo   DANG TU DONG DAY CAP NHAT LEN GITHUB...
 echo ====================================================
 
-rem Kiem tra xem thu muc da duoc cau hinh Git chua
+rem Kiem tra thu muc Git
 if not exist .git goto NO_GIT
 
-rem Lay ngay gio hien tai lam commit message tu dong
+rem Lay ngay gio hien tai
 for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set datetime=%%I
 set commit_msg=Auto-Update-%datetime:~0,4%-%datetime:~4,2%-%datetime:~6,2%-%datetime:~8,2%-%datetime:~10,2%
 
 echo.
-echo [+] Buoc 1: Quet cac file code thay doi...
+echo [+] Buoc 1: Quet cac file thay doi...
 git add .
 
-echo [+] Buoc 2: Tao ban ghi commit voi thong diep: "%commit_msg%"
+echo [+] Buoc 2: Tao ban ghi commit...
 git commit -m "%commit_msg%"
 
-echo [+] Buoc 3: Dang day code len Github origin main...
+echo [+] Buoc 3: Day code len Github...
 echo.
 git push origin main
 
