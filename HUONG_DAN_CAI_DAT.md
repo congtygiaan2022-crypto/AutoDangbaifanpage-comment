@@ -6,7 +6,7 @@ Tài liệu này hướng dẫn bạn cách thiết lập môi trường để c
 
 ## 1. Yêu cầu hệ thống
 - **Hệ điều hành**: Windows 10/11 (64-bit).
-- **Python**: Phiên bản 3.10 trở lên.
+- **Python**: phiên bản v1.0.0 trở lên.
 - **Phần mềm hỗ trợ**: GemLogin (để quản lý trình duyệt và proxy).
 
 ---

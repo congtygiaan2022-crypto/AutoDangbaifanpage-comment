@@ -32,7 +32,7 @@ import psutil
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Công Cụ Đăng Reels Tự Động - Phiên bản v2.1 (GPM/GemLogin)")
+        self.title("Công Cụ Đăng Reels Tự Động - Phiên bản v1.0.0 (GPM/GemLogin)")
         self.geometry("1100x700")
         self.minsize(900, 600)
 
