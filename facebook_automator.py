@@ -11,6 +11,9 @@ import os
 import re
 import random
 
+class PageAccessDeniedException(Exception):
+    pass
+
 class FacebookAutomator:
     def __init__(self, debugger_address, driver_path=None, strategies=None):
         chrome_options = Options()
@@ -48,6 +51,32 @@ class FacebookAutomator:
             print(f"Error connecting to browser: {e}")
             raise e
 
+    def _check_page_accessibility(self):
+        """
+        Check if the current page displays a 'Content unavailable' or 'Access denied' error.
+        Raises PageAccessDeniedException if the page is not accessible.
+        """
+        try:
+            source = self.driver.page_source
+            # Check English and Vietnamese keywords for content not available / permissions denied
+            keywords = [
+                "content isn't available right now",
+                "link you followed may have expired",
+                "visible to an audience you're not in",
+                "nội dung này hiện không khả dụng",
+                "liên kết bạn đã theo dõi",
+                "không nằm trong số đó",
+                "permission denied",
+                "sufficient permissions"
+            ]
+            for kw in keywords:
+                if kw.lower() in source.lower():
+                    raise PageAccessDeniedException(f"Phát hiện lỗi truy cập trang: {kw}")
+        except PageAccessDeniedException:
+            raise
+        except Exception:
+            pass
+
     def resolve_asset_id(self, page_link):
         # Try to find asset_id in URL without navigation first
         asset_id = None
@@ -64,6 +93,7 @@ class FacebookAutomator:
         print(f"[Automator] Navigating to resolve IDs: {page_link}")
         self.driver.get(page_link)
         time.sleep(5)
+        self._check_page_accessibility()
         
         if "asset_id=" in self.driver.current_url:
             asset_id = self.driver.current_url.split("asset_id=")[-1].split("&")[0]
@@ -100,7 +130,7 @@ class FacebookAutomator:
         # Luôn dùng Phương án Bulk (Phương án chính hiện tại)
         # Nếu là string đơn lẻ, bọc lại thành list để Bulk xử lý đồng nhất
         batch = video_path if isinstance(video_path, list) else [(video_path, title)]
-        return self.upload_reels_bulk(asset_id, batch)
+        return self.upload_reels_bulk(asset_id, batch, upload_url=page_link)
 
     def log(self, msg):
         print(f"[Automator] {msg}")
@@ -143,12 +173,13 @@ class FacebookAutomator:
         return False
 
 
-    def upload_reels_bulk(self, asset_id, batch_list):
+    def upload_reels_bulk(self, asset_id, batch_list, upload_url=None):
         """
         batch_list: List of (video_path, title)
         """
         self.set_timeout()
-        upload_url = f"https://business.facebook.com/latest/bulk_upload_composer?asset_id={asset_id}"
+        if not upload_url or "bulk_upload_composer" not in upload_url:
+            upload_url = f"https://business.facebook.com/latest/bulk_upload_composer?asset_id={asset_id}"
         
         # 0. Skip redundant navigation if already there
         if upload_url.lower() not in self.driver.current_url.lower():
@@ -156,6 +187,8 @@ class FacebookAutomator:
             self._safe_get(upload_url)
         else:
             self.log(f"[BULK] Already at composer URL: {upload_url}. Skipping reload.")
+
+        self._check_page_accessibility()
 
         # Handle "Select Page" or "Get Started" screen if needed
         self._dismiss_tooltips()

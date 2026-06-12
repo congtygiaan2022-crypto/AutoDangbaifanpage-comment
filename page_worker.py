@@ -90,7 +90,7 @@ sys.stderr = _TimestampWriter(sys.stderr)
 from database import Database
 from gemlogin_api import GemLoginAPI
 from gpmlogin_api import GPMLoginAPI
-from facebook_automator import FacebookAutomator
+from facebook_automator import FacebookAutomator, PageAccessDeniedException
 
 def log(msg):
     # TimestampWriter adds [HH:MM:SS] prefix automatically to every print()
@@ -126,7 +126,18 @@ def run_worker(job_path):
     profile_label = job.get('profile_label', f'Profile {p_id}')
     shopee_mode = job.get('shopee_mode', False)
 
-    db = Database()
+    db_file = job.get('db_file', 'database.json')
+    sqlite_file = job.get('sqlite_file', 'system.db')
+
+    # Dynamically configure SQLite file path for the active profile
+    from db_helper import db as sqlite_db
+    sqlite_db.db_path = sqlite_file
+    try:
+        from init_db import init_db
+        init_db(sqlite_file)
+    except: pass
+
+    db = Database(db_file)
 
     log(f"[Worker:{profile_label}] Bắt đầu xử lý {len(pages)} Fanpage.")
 
@@ -283,7 +294,7 @@ def run_worker(job_path):
                         batch_size = max(1, min(max_v, 10))
                         for chunk_start in range(0, len(batch_to_post), batch_size):
                             chunk = batch_to_post[chunk_start: chunk_start + batch_size]
-                            result = automator.upload_reels_bulk(asset_id, chunk)
+                            result = automator.upload_reels_bulk(asset_id, chunk, upload_url=page.get('link'))
                             log(f"[Worker:{profile_label}] [{page_name}] Upload: {result}")
 
                             # Track successfully uploaded files
@@ -358,6 +369,10 @@ def run_worker(job_path):
 
                     page_success = True
 
+                except PageAccessDeniedException as access_e:
+                    log(f"[Worker:{profile_label}] {stt} [{page_name}] ⚠️ BỎ QUA PAGE: {access_e}")
+                    page_success = True
+                    break
                 except Exception as page_e:
                     is_disconnect = is_browser_disconnected_exception(page_e)
                     if is_disconnect and page_attempts < max_page_attempts:

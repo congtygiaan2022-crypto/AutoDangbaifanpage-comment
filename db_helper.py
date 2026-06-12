@@ -134,6 +134,6 @@ db = DatabaseHelper()
 # Auto-initialize database schema if it doesn't exist
 try:
     from init_db import init_db
-    init_db()
+    init_db(db.db_path)
 except Exception as e:
     logger.error(f"Failed to auto-initialize database schema: {e}")
