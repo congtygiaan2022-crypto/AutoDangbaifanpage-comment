@@ -43,6 +43,7 @@ class App(tk.Tk):
         except: pass
         
         self.db = Database(db_file)
+        self.profile_name = profile_name
         self.title(f"Gams - Auto Post Reel Fanpage v1.1.0 - [{profile_name}]")
         self.geometry("1200x750")
         self.minsize(1050, 650)
@@ -574,6 +575,30 @@ class App(tk.Tk):
         btn_ref_prof.grid(row=0, column=1, padx=(3, 0))
         self.style_button(btn_ref_prof, "#f0f0f0", "#e0e0e0", fg_color="#333333")
 
+        # Profiles chạy Listbox (Row 4)
+        tk.Label(inputs_grid, text="Profiles chạy:", bg="#ffffff", font=self.font_bold).grid(row=4, column=0, sticky="nw", pady=4)
+        list_f = tk.Frame(inputs_grid, bg="#ffffff")
+        list_f.grid(row=4, column=1, sticky="ew", padx=(10, 0), pady=4)
+        list_f.columnconfigure(0, weight=1)
+        
+        self.det_profile_listbox = tk.Listbox(list_f, font=self.font_main, height=3, bd=1, relief="solid")
+        self.det_profile_listbox.grid(row=0, column=0, sticky="ew")
+        
+        list_scroll = ttk.Scrollbar(list_f, orient="vertical", command=self.det_profile_listbox.yview)
+        list_scroll.grid(row=0, column=1, sticky="ns")
+        self.det_profile_listbox.configure(yscrollcommand=list_scroll.set)
+        
+        btn_f = tk.Frame(list_f, bg="#ffffff")
+        btn_f.grid(row=0, column=2, padx=(5, 0), sticky="n")
+        
+        btn_add = tk.Button(btn_f, text="➕ Thêm", command=self.add_profile_to_page, font=("Segoe UI", 8, "bold"), padx=6, pady=2)
+        btn_add.pack(fill="x", pady=1)
+        self.style_button(btn_add, "#3a9a5c", "#2d7647")
+        
+        btn_del = tk.Button(btn_f, text="➖ Xóa", command=self.remove_profile_from_page, font=("Segoe UI", 8, "bold"), padx=6, pady=2)
+        btn_del.pack(fill="x", pady=1)
+        self.style_button(btn_del, "#ea4335", "#d62516")
+
         # 3. Individual video folders editor section
         self.folders_grp = tk.LabelFrame(self.detail_inner, text=" 📂 Thư Mục Video Chỉ Định ", font=self.font_bold, bg="#ffffff", bd=1, relief="solid", padx=10, pady=10)
         self.folders_grp.pack(fill="x", pady=10)
@@ -783,6 +808,18 @@ class App(tk.Tk):
         
         self._build_settings_browser_section()
 
+        # Backup & Restore Group
+        backup_grp = tk.LabelFrame(col2, text=" 💾 Sao Lưu & Khôi Phục Dữ Liệu ", font=self.font_bold, bg="#ffffff", bd=1, relief="solid", padx=10, pady=10)
+        backup_grp.pack(fill="x", pady=10)
+        
+        btn_backup = tk.Button(backup_grp, text="📤 Sao Lưu Profile Hiện Tại", command=self.backup_current_profile_ui, font=self.font_main, pady=4)
+        btn_backup.pack(fill="x", pady=2)
+        self.style_button(btn_backup, "#1a73e8", "#1557b0")
+        
+        btn_restore = tk.Button(backup_grp, text="📥 Khôi Phục Dữ Liệu Từ File", command=self.restore_current_profile_ui, font=self.font_main, pady=4)
+        btn_restore.pack(fill="x", pady=2)
+        self.style_button(btn_restore, "#f2994a", "#e28732")
+
     def _build_settings_browser_section(self):
         # Clear previous elements
         for w in self.browser_sett_frame.winfo_children():
@@ -899,6 +936,209 @@ class App(tk.Tk):
                 btn_del = tk.Button(row, text="Xóa", command=make_del_hub(), font=("Segoe UI", 8), padx=5, pady=1)
                 btn_del.pack(side="right")
                 self.style_button(btn_del, "#ea4335", "#c5221f")
+
+    def backup_current_profile_ui(self):
+        import zipfile
+        
+        # Determine default backup filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_profile_name = "".join(c for c in self.profile_name if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
+        default_filename = f"backup_{safe_profile_name}_{timestamp}.zip"
+        
+        file_path = filedialog.asksaveasfilename(
+            title="Chọn nơi lưu bản sao lưu",
+            initialfile=default_filename,
+            filetypes=[("ZIP files", "*.zip")],
+            defaultextension=".zip"
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            # Source files
+            db_json_path = self.db.file_path
+            from db_helper import db as sqlite_db
+            sqlite_path = sqlite_db.db_path
+            
+            # Create zip
+            with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
+                # Add database JSON
+                if os.path.exists(db_json_path):
+                    zip_ref.write(db_json_path, "config.json")
+                    
+                # Add SQLite DB
+                if os.path.exists(sqlite_path):
+                    zip_ref.write(sqlite_path, "history.db")
+                    
+                # Add metadata
+                metadata = {
+                    "profile_name": self.profile_name,
+                    "backup_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "version": "1.1.0"
+                }
+                zip_ref.writestr("metadata.json", json.dumps(metadata, indent=4, ensure_ascii=False))
+                
+            messagebox.showinfo("Thành công", f"Đã sao lưu Profile '{self.profile_name}' thành công!")
+            self.log(f"Đã sao lưu Profile '{self.profile_name}' vào tệp: {file_path}")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể tạo bản sao lưu: {e}")
+            self.log(f"Lỗi khi sao lưu: {e}")
+
+    def restore_current_profile_ui(self):
+        import zipfile
+        
+        file_path = filedialog.askopenfilename(
+            title="Chọn tệp sao lưu để khôi phục (.zip)",
+            filetypes=[("ZIP files", "*.zip")]
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            # Verify zip content
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                file_list = zip_ref.namelist()
+                if "config.json" not in file_list:
+                    messagebox.showerror("Lỗi", "Tệp sao lưu không hợp lệ (Không tìm thấy config.json).")
+                    return
+                
+                # Try to read metadata to show a nice prompt
+                meta_info = ""
+                if "metadata.json" in file_list:
+                    try:
+                        metadata = json.loads(zip_ref.read("metadata.json").decode('utf-8'))
+                        meta_info = f"\n- Profile gốc: {metadata.get('profile_name')}\n- Thời gian sao lưu: {metadata.get('backup_time')}"
+                    except: pass
+                
+                confirm = messagebox.askyesno(
+                    "Xác nhận khôi phục",
+                    f"Bạn có chắc chắn muốn khôi phục dữ liệu từ tệp sao lưu này?{meta_info}\n\n⚠️ HÀNH ĐỘNG NÀY SẼ GHI ĐÈ TOÀN BỘ cấu hình và lịch sử hiện tại của Profile '{self.profile_name}'!"
+                )
+                
+                if not confirm:
+                    return
+                
+                # Extract and overwrite
+                db_json_path = self.db.file_path
+                from db_helper import db as sqlite_db
+                sqlite_path = sqlite_db.db_path
+                
+                # Overwrite JSON
+                with open(db_json_path, 'wb') as f:
+                    f.write(zip_ref.read("config.json"))
+                    
+                # Overwrite SQLite
+                if "history.db" in file_list:
+                    with open(sqlite_path, 'wb') as f:
+                        f.write(zip_ref.read("history.db"))
+                        
+            # Reload Database and refresh UI
+            self.db = Database(db_json_path)
+            self.refresh_ui()
+            
+            messagebox.showinfo("Thành công", f"Đã khôi phục dữ liệu Profile '{self.profile_name}' thành công!")
+            self.log(f"Đã khôi phục dữ liệu Profile '{self.profile_name}' từ tệp: {file_path}")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể khôi phục dữ liệu: {e}")
+            self.log(f"Lỗi khi khôi phục: {e}")
+
+    def select_multiple_profiles_dialog(self, title="Chọn nhiều Profile", initial_ids=None):
+        """
+        Shows a dialog with checkboxes to select multiple browser profiles.
+        Returns (b_id, comma_separated_ids, comma_separated_names) or (None, None, None).
+        """
+        # If no profiles are loaded
+        if not self._unified_profile_map:
+            messagebox.showwarning("Thông báo", "Không có profile trình duyệt nào được tải.")
+            return None, None, None
+            
+        win = tk.Toplevel(self)
+        win.title(title)
+        win.geometry("400x500")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        
+        # Parse initial_ids
+        init_ids_set = set()
+        if initial_ids:
+            init_ids_set = {pid.strip() for pid in str(initial_ids).split(',') if pid.strip()}
+            
+        main_frame = tk.Frame(win, padx=15, pady=15)
+        main_frame.pack(fill="both", expand=True)
+        
+        tk.Label(main_frame, text="Tích chọn các Profile muốn gán:", font=self.font_bold).pack(anchor="w", pady=(0, 10))
+        
+        # Scrollable list of profiles
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scroll_frame = tk.Frame(canvas)
+        
+        def on_canvas_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        canvas.bind("<Configure>", on_canvas_configure)
+        
+        # Hook mouse wheel
+        canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        scroll_frame.bind("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        
+        # Populate checklist
+        vars_list = [] # List of (BooleanVar, b_id, p_id, p_name)
+        for opt, (b_id, p_id, p_name) in self._unified_profile_map.items():
+            var = tk.BooleanVar(value=(str(p_id) in init_ids_set))
+            chk = tk.Checkbutton(scroll_frame, text=opt, variable=var, font=self.font_main)
+            chk.pack(anchor="w", pady=2)
+            # Bind wheel to checkbuttons too
+            chk.bind("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+            vars_list.append((var, b_id, p_id, p_name))
+            
+        result = {"b_id": None, "ids": None, "names": None, "submitted": False}
+        
+        def on_submit():
+            selected = [item for item in vars_list if item[0].get()]
+            if not selected:
+                messagebox.showwarning("Cảnh báo", "Vui lòng chọn ít nhất 1 profile.")
+                return
+            
+            # Ensure all selected profiles belong to the same browser hub
+            b_ids_selected = {item[1] for item in selected}
+            if len(b_ids_selected) > 1:
+                messagebox.showerror("Lỗi", "Tất cả profile được chọn phải thuộc cùng một trình duyệt.")
+                return
+                
+            chosen_b_id = list(b_ids_selected)[0]
+            chosen_ids = ",".join(str(item[2]) for item in selected)
+            chosen_names = ", ".join(item[3] for item in selected)
+            
+            result["b_id"] = chosen_b_id
+            result["ids"] = chosen_ids
+            result["names"] = chosen_names
+            result["submitted"] = True
+            win.destroy()
+            
+        footer = tk.Frame(win, pady=10)
+        footer.pack(side="bottom")
+        
+        btn_submit = tk.Button(footer, text="Xác nhận", command=on_submit, width=12, pady=5)
+        btn_submit.pack(side="left", padx=5)
+        self.style_button(btn_submit, "#1a73e8", "#1557b0")
+        
+        btn_cancel = tk.Button(footer, text="Hủy", command=win.destroy, width=12, pady=5)
+        btn_cancel.pack(side="left", padx=5)
+        self.style_button(btn_cancel, "#5f6368", "#474a4d")
+        
+        win.wait_window()
+        
+        if result["submitted"]:
+            return result["b_id"], result["ids"], result["names"]
+        return None, None, None
 
     # ─── CORE GUI REFRESH & EVENT HANDLERS ───────────────────
     def refresh_ui(self):
@@ -1059,6 +1299,7 @@ class App(tk.Tk):
         
         # Profile Dropdown
         self._update_detail_profile_dropdown()
+        self.refresh_detail_profile_listbox()
         
         # Comments Template
         self.det_comment_txt.delete("1.0", "end")
@@ -1073,25 +1314,36 @@ class App(tk.Tk):
             
         page = self.db.get_fanpages()[self.current_selected_page_idx]
         
-        self.det_profile_combo['values'] = self._unified_profile_options
+        opts = list(self._unified_profile_options) + ["+ Chọn nhiều Profile..."]
+        self.det_profile_combo['values'] = opts
         
         curr_b_id = page.get('browser_id')
         curr_p_id = page.get('profile_id')
         
         if curr_b_id and curr_p_id:
-            found_opt = None
-            for opt, (b_id, p_id, p_name) in self._unified_profile_map.items():
-                if b_id == curr_b_id and str(p_id) == str(curr_p_id):
-                    found_opt = opt
-                    break
-            
-            if found_opt:
-                self.det_profile_combo.set(found_opt)
-            else:
-                p_name_stored = page.get('profile_name', 'Unknown')
+            if ',' in str(curr_p_id):
+                p_name_stored = page.get('profile_name', 'Multiple Profiles')
                 target_b = self.db.get_browser_by_id(curr_b_id)
                 b_name_stored = target_b['name'] if target_b else "Unknown"
-                self.det_profile_combo.set(f"[{b_name_stored}] {p_name_stored}")
+                opt_str = f"[{b_name_stored}] {p_name_stored}"
+                self.det_profile_combo.set(opt_str)
+                self._unified_profile_map[opt_str] = (curr_b_id, curr_p_id, p_name_stored)
+            else:
+                found_opt = None
+                for opt, (b_id, p_id, p_name) in self._unified_profile_map.items():
+                    if b_id == curr_b_id and str(p_id) == str(curr_p_id):
+                        found_opt = opt
+                        break
+                
+                if found_opt:
+                    self.det_profile_combo.set(found_opt)
+                else:
+                    p_name_stored = page.get('profile_name', 'Unknown')
+                    target_b = self.db.get_browser_by_id(curr_b_id)
+                    b_name_stored = target_b['name'] if target_b else "Unknown"
+                    opt_str = f"[{b_name_stored}] {p_name_stored}"
+                    self.det_profile_combo.set(opt_str)
+                    self._unified_profile_map[opt_str] = (curr_b_id, curr_p_id, p_name_stored)
         else:
             self.det_profile_combo.set("(Chưa gán Profile)")
 
@@ -1138,12 +1390,121 @@ class App(tk.Tk):
         if idx is None: return
         
         opt = self.det_profile_combo.get()
-        if opt in self._unified_profile_map:
+        if opt == "+ Chọn nhiều Profile...":
+            page = self.db.get_fanpages()[idx]
+            initial_ids = page.get('profile_id', '')
+            b_id, p_ids, p_names = self.select_multiple_profiles_dialog("Chọn nhiều Profile cho Fanpage", initial_ids)
+            if p_ids:
+                self.db.update_page_browser(idx, b_id)
+                self.db.update_page_profile(idx, p_ids, p_names)
+                self.log(f"Gán nhiều profile ({p_names}) cho Fanpage #{idx+1}")
+                self.show_page_details(idx)
+                self.refresh_tree_row(idx)
+            else:
+                self._update_detail_profile_dropdown()
+        elif opt in self._unified_profile_map:
             b_id, p_id, p_name = self._unified_profile_map[opt]
             self.db.update_page_browser(idx, b_id)
             self.db.update_page_profile(idx, p_id, p_name)
             self.log(f"Gán profile {opt} cho Fanpage #{idx+1}")
             self.refresh_tree_row(idx)
+
+    def add_profile_to_page(self):
+        idx = self.current_selected_page_idx
+        if idx is None: return
+        
+        opt = self.det_profile_combo.get()
+        if not opt or opt == "(Chưa gán Profile)" or opt == "+ Chọn nhiều Profile...":
+            messagebox.showwarning("Thông báo", "Vui lòng chọn một Profile trong danh sách trước khi thêm.")
+            return
+            
+        if opt not in self._unified_profile_map:
+            messagebox.showwarning("Thông báo", "Profile không hợp lệ.")
+            return
+            
+        b_id, p_id, p_name = self._unified_profile_map[opt]
+        
+        page = self.db.get_fanpages()[idx]
+        curr_b_id = page.get('browser_id')
+        
+        if curr_b_id and curr_b_id != b_id:
+            if not messagebox.askyesno("Xác nhận", f"Profile này thuộc trình duyệt khác ({b_id}) so với trình duyệt của Fanpage ({curr_b_id}).\nBạn có muốn chuyển sang trình duyệt {b_id} và gán profile này không?"):
+                return
+            p_ids = str(p_id)
+            p_names = str(p_name)
+        else:
+            curr_p_id_str = str(page.get('profile_id', ''))
+            curr_p_name_str = str(page.get('profile_name', ''))
+            
+            p_ids_list = [p.strip() for p in curr_p_id_str.split(',') if p.strip()]
+            p_names_list = [n.strip() for n in curr_p_name_str.split(',') if n.strip()]
+            
+            if str(p_id) in p_ids_list:
+                messagebox.showwarning("Thông báo", "Profile này đã được gán rồi.")
+                return
+                
+            p_ids_list.append(str(p_id))
+            p_names_list.append(str(p_name))
+            
+            p_ids = ",".join(p_ids_list)
+            p_names = ",".join(p_names_list)
+            
+        self.db.update_page_browser(idx, b_id, save=False)
+        self.db.update_page_profile(idx, p_ids, p_names, save=True)
+        self.log(f"Đã thêm profile [{p_name}] cho Fanpage #{idx+1}")
+        
+        self._update_detail_profile_dropdown()
+        self.refresh_detail_profile_listbox()
+        self.refresh_tree_row(idx)
+
+    def remove_profile_from_page(self):
+        idx = self.current_selected_page_idx
+        if idx is None: return
+        
+        sel_idx = self.det_profile_listbox.curselection()
+        if not sel_idx:
+            messagebox.showwarning("Thông báo", "Vui lòng chọn một Profile trong danh sách chạy để xóa.")
+            return
+            
+        page = self.db.get_fanpages()[idx]
+        curr_p_id_str = str(page.get('profile_id', ''))
+        curr_p_name_str = str(page.get('profile_name', ''))
+        
+        p_ids_list = [p.strip() for p in curr_p_id_str.split(',') if p.strip()]
+        p_names_list = [n.strip() for n in curr_p_name_str.split(',') if n.strip()]
+        
+        del_idx = sel_idx[0]
+        if 0 <= del_idx < len(p_ids_list):
+            del_name = p_names_list[del_idx]
+            
+            p_ids_list.pop(del_idx)
+            p_names_list.pop(del_idx)
+            
+            p_ids = ",".join(p_ids_list)
+            p_names = ",".join(p_names_list)
+            
+            self.db.update_page_profile(idx, p_ids, p_names, save=True)
+            self.log(f"Đã xóa profile [{del_name}] khỏi Fanpage #{idx+1}")
+            
+            self._update_detail_profile_dropdown()
+            self.refresh_detail_profile_listbox()
+            self.refresh_tree_row(idx)
+
+    def refresh_detail_profile_listbox(self):
+        if not hasattr(self, 'det_profile_listbox'): return
+        self.det_profile_listbox.delete(0, "end")
+        idx = self.current_selected_page_idx
+        if idx is None: return
+        
+        page = self.db.get_fanpages()[idx]
+        curr_p_id_str = str(page.get('profile_id', ''))
+        curr_p_name_str = str(page.get('profile_name', ''))
+        
+        p_ids_list = [p.strip() for p in curr_p_id_str.split(',') if p.strip()]
+        p_names_list = [n.strip() for n in curr_p_name_str.split(',') if n.strip()]
+        
+        for pid, pname in zip(p_ids_list, p_names_list):
+            self.det_profile_listbox.insert("end", f"{pname} (ID: {pid})")
 
     def refresh_detail_folders(self):
         for w in self.det_folders_container.winfo_children():
@@ -1785,10 +2146,157 @@ class App(tk.Tk):
         self.db.remove_global_folder(index)
         self._refresh_global_folders_ui()
 
+    def group_profiles_manager_dialog(self, group_id, group_name, refresh_callback=None):
+        win = tk.Toplevel(self)
+        win.title(f"Cấu Hình Profiles Nhóm: {group_name}")
+        win.geometry("450x380")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        
+        main_frame = tk.Frame(win, padx=15, pady=15)
+        main_frame.pack(fill="both", expand=True)
+        
+        tk.Label(main_frame, text=f"Nhóm: {group_name}", font=self.font_bold).pack(anchor="w", pady=(0, 10))
+        
+        # 1. Selector row
+        sel_row = tk.Frame(main_frame)
+        sel_row.pack(fill="x", pady=5)
+        tk.Label(sel_row, text="Chọn Profile:", font=self.font_bold).pack(side="left", padx=(0, 5))
+        
+        # Available profiles combobox
+        p_combo = ttk.Combobox(sel_row, state="readonly", width=35)
+        p_combo.pack(side="left", padx=5)
+        self._disable_combo_scroll(p_combo)
+        
+        # Populate values
+        opts = list(self._unified_profile_options)
+        p_combo['values'] = opts
+        if opts:
+            p_combo.set(opts[0])
+            
+        # 2. Listbox & Scrollbar
+        list_frame = tk.Frame(main_frame)
+        list_frame.pack(fill="both", expand=True, pady=10)
+        
+        tk.Label(list_frame, text="Danh sách các Profile chạy song song:", font=self.font_bold).pack(anchor="w", pady=(0, 5))
+        
+        list_container = tk.Frame(list_frame)
+        list_container.pack(fill="both", expand=True)
+        
+        listbox = tk.Listbox(list_container, font=self.font_main, bd=1, relief="solid")
+        listbox.pack(side="left", fill="both", expand=True)
+        
+        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=listbox.yview)
+        scrollbar.pack(side="right", fill="y")
+        listbox.configure(yscrollcommand=scrollbar.set)
+        
+        # Populate current profiles of the group
+        groups = self.db.get_groups()
+        g = next((group for group in groups if group['id'] == group_id), {})
+        
+        curr_b_id = g.get('browser_id')
+        curr_p_id_str = str(g.get('profile_id', ''))
+        curr_p_name_str = str(g.get('profile_name', ''))
+        
+        p_ids_list = [p.strip() for p in curr_p_id_str.split(',') if p.strip()]
+        p_names_list = [n.strip() for n in curr_p_name_str.split(',') if n.strip()]
+        
+        # Track local lists
+        local_data = {
+            'b_id': curr_b_id,
+            'ids': p_ids_list,
+            'names': p_names_list
+        }
+        
+        def refresh_local_list():
+            listbox.delete(0, "end")
+            for pid, pname in zip(local_data['ids'], local_data['names']):
+                listbox.insert("end", f"{pname} (ID: {pid})")
+                
+        refresh_local_list()
+        
+        # Buttons Frame (Add/Remove)
+        btns_row = tk.Frame(main_frame)
+        btns_row.pack(fill="x", pady=5)
+        
+        def add_prof():
+            opt = p_combo.get()
+            if not opt or opt not in self._unified_profile_map:
+                messagebox.showwarning("Cảnh báo", "Vui lòng chọn một profile hợp lệ.", parent=win)
+                return
+                
+            b_id, p_id, p_name = self._unified_profile_map[opt]
+            
+            # If group has a different browser assigned, ask if they want to switch
+            if local_data['b_id'] and local_data['b_id'] != b_id:
+                if not messagebox.askyesno("Xác nhận", f"Profile này thuộc trình duyệt khác ({b_id}) so với trình duyệt của nhóm ({local_data['b_id']}).\nBạn có muốn chuyển nhóm sang trình duyệt {b_id} và gán profile này không?", parent=win):
+                    return
+                # Reset since browser changed
+                local_data['b_id'] = b_id
+                local_data['ids'] = []
+                local_data['names'] = []
+                
+            if not local_data['b_id']:
+                local_data['b_id'] = b_id
+                
+            if str(p_id) in local_data['ids']:
+                messagebox.showwarning("Cảnh báo", "Profile này đã được thêm vào danh sách.", parent=win)
+                return
+                
+            local_data['ids'].append(str(p_id))
+            local_data['names'].append(str(p_name))
+            refresh_local_list()
+            
+        def remove_prof():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showwarning("Cảnh báo", "Vui lòng chọn một profile trong danh sách để xóa.", parent=win)
+                return
+            del_idx = sel[0]
+            if 0 <= del_idx < len(local_data['ids']):
+                local_data['ids'].pop(del_idx)
+                local_data['names'].pop(del_idx)
+                refresh_local_list()
+                
+        btn_add = tk.Button(btns_row, text="➕ Thêm Profile", command=add_prof, font=("Segoe UI", 9, "bold"), padx=10, pady=4)
+        btn_add.pack(side="left", padx=5)
+        self.style_button(btn_add, "#3a9a5c", "#2d7647")
+        
+        btn_del = tk.Button(btns_row, text="➖ Xóa Profile", command=remove_prof, font=("Segoe UI", 9, "bold"), padx=10, pady=4)
+        btn_del.pack(side="left", padx=5)
+        self.style_button(btn_del, "#ea4335", "#d62516")
+        
+        # Save & Cancel row
+        footer = tk.Frame(win, pady=10)
+        footer.pack(side="bottom")
+        
+        def on_save():
+            new_p_ids = ",".join(local_data['ids'])
+            new_p_names = ",".join(local_data['names'])
+            b_id = local_data['b_id'] or "gemlogin_default"
+            
+            self.db.update_group(group_id, group_name, b_id, new_p_ids, new_p_names)
+            self.log(f"Đã cập nhật danh sách profiles cho Nhóm {group_name}: {new_p_names}")
+            
+            if refresh_callback:
+                refresh_callback()
+            self.refresh_ui()
+            win.destroy()
+            
+        btn_save = tk.Button(footer, text="Lưu", command=on_save, width=12, pady=5)
+        btn_save.pack(side="left", padx=5)
+        self.style_button(btn_save, "#1a73e8", "#1557b0")
+        
+        btn_cancel = tk.Button(footer, text="Hủy", command=win.destroy, width=12, pady=5)
+        btn_cancel.pack(side="left", padx=5)
+        self.style_button(btn_cancel, "#5f6368", "#474a4d")
+        
+        win.wait_window()
+
     def group_management_ui(self):
         win = tk.Toplevel(self)
         win.title("Quản Lý Nhóm Fanpage")
-        win.geometry("650x500")
+        win.geometry("780x500")
         win.attributes("-topmost", True)
 
         main_frame = tk.Frame(win, padx=15, pady=15)
@@ -1838,10 +2346,16 @@ class App(tk.Tk):
                 curr_b_id = g.get('browser_id')
                 curr_p_id = g.get('profile_id')
                 found_opt = ""
-                for opt, (b_id, p_id, p_name) in unified_map.items():
-                    if b_id == curr_b_id and str(p_id) == str(curr_p_id):
-                        found_opt = opt
-                        break
+                if curr_b_id and curr_p_id:
+                    if ',' in str(curr_p_id):
+                        b_config = self.db.get_browser_by_id(curr_b_id)
+                        b_name_str = b_config['name'] if b_config else "Unknown"
+                        found_opt = f"[{b_name_str}] {g.get('profile_name', 'Multiple Profiles')}"
+                    else:
+                        for opt, (b_id, p_id, p_name) in unified_map.items():
+                            if b_id == curr_b_id and str(p_id) == str(curr_p_id):
+                                found_opt = opt
+                                break
                 
                 if not found_opt and curr_b_id and curr_p_id:
                     b_config = self.db.get_browser_by_id(curr_b_id)
@@ -1851,9 +2365,24 @@ class App(tk.Tk):
                     unified_map[found_opt] = (curr_b_id, curr_p_id, g.get('profile_name', 'Unknown'))
                 
                 b_var = tk.StringVar(value=found_opt)
-                b_combo = ttk.Combobox(g_row, textvariable=b_var, values=unified_opts, state="readonly", width=30)
+                combo_opts = list(unified_opts) + ["+ Chọn nhiều Profile..."]
+                b_combo = ttk.Combobox(g_row, textvariable=b_var, values=combo_opts, state="readonly", width=20)
                 b_combo.pack(side="left", padx=5)
                 self._disable_combo_scroll(b_combo)
+
+                # Profiles manager button next to combobox
+                btn_profiles = tk.Button(g_row, text="👥 Profiles", command=lambda gid=g['id'], name=g['name']: self.group_profiles_manager_dialog(gid, name, refresh_callback=refresh_list), font=("Segoe UI", 9, "bold"), padx=5)
+                btn_profiles.pack(side="left", padx=2)
+                self.style_button(btn_profiles, "#7c5cbf", "#6242a3")
+
+                def make_combo_select(bv=b_var, gid=g['id'], name=g['name']):
+                    def _select(event=None):
+                        opt = bv.get()
+                        if opt == "+ Chọn nhiều Profile...":
+                            self.group_profiles_manager_dialog(gid, name, refresh_callback=refresh_list)
+                    return _select
+                
+                b_combo.bind("<<ComboboxSelected>>", make_combo_select(b_var, g['id'], g['name']))
 
                 def make_save(gid=g['id'], ne=name_ent, bv=b_var, umap=unified_map):
                     def _save():
@@ -2084,8 +2613,11 @@ class App(tk.Tk):
                     self.log(f"Quét công việc của {total_en} Fanpage...")
                     
                     global_folders = self.db.get_global_folders()
-                    profile_groups = {}
+                    groups = self.db.get_groups()
+                    group_map = {g['id']: g for g in groups}
                     
+                    # 1. Collect pages that have work
+                    work_candidates = []
                     for idx, page in enumerate(enabled_pages, 1):
                         if self.stop_flag: break
                         page_name = page.get('name', '?')
@@ -2126,30 +2658,213 @@ class App(tk.Tk):
                         if not has_work:
                             self.log(f"{stt} [{page_name}] Bỏ qua (Không có bài mới cần đăng)")
                             continue
-                        
+                            
                         # Find original index
                         p_idx = -1
                         for k, p_raw in enumerate(fanpages):
                             if p_raw['link'] == page['link']:
                                 p_idx = k
                                 break
+                                
+                        # Get candidate profile ids
+                        p_id_str = str(page.get('profile_id', ''))
+                        p_ids = [p.strip() for p in p_id_str.split(',') if p.strip()]
+                        p_names_str = str(page.get('profile_name', ''))
+                        p_names = [p.strip() for p in p_names_str.split(',') if p.strip()]
                         
-                        b_id = self.db.resolve_page_browser_id(p_idx) if p_idx != -1 else page.get('browser_id', 'gemlogin_default')
-                        p_id = page.get('profile_id', '')
-                        key = (b_id, p_id)
+                        # If page has no profile, check group
+                        p_group_id = page.get('group_id', '')
+                        if not p_ids and p_group_id and p_group_id in group_map:
+                            g = group_map[p_group_id]
+                            g_p_id_str = str(g.get('profile_id', ''))
+                            p_ids = [p.strip() for p in g_p_id_str.split(',') if p.strip()]
+                            g_p_names_str = str(g.get('profile_name', ''))
+                            p_names = [p.strip() for p in g_p_names_str.split(',') if p.strip()]
+                            
+                        if not p_ids:
+                            p_ids = [""]
+                            p_names = [""]
+                            
+                        b_id = page.get('browser_id', 'gemlogin_default')
+                        if p_idx != -1:
+                            b_id = self.db.resolve_page_browser_id(p_idx)
+                        if p_group_id and p_group_id in group_map:
+                            if not page.get('browser_id'):
+                                b_id = group_map[p_group_id].get('browser_id', b_id)
+                                
+                        work_candidates.append({
+                            'page': page,
+                            'folders': folders,
+                            'unposted_files': unposted_files,
+                            'to_comment_historic': to_comment_historic,
+                            'b_id': b_id,
+                            'p_ids': p_ids,
+                            'p_names': p_names,
+                            'stt': stt,
+                            'page_name': page_name
+                        })
+                        
+                    # --- Profile Conflict Elimination Algorithm ---
+                    # Group work_candidates by browser_id
+                    candidates_by_browser = {}
+                    for item in work_candidates:
+                        bid = item['b_id']
+                        if bid not in candidates_by_browser:
+                            candidates_by_browser[bid] = []
+                        candidates_by_browser[bid].append(item)
+
+                    for bid, items in candidates_by_browser.items():
+                        # Determine group for each item
+                        for item in items:
+                            pg = item['page']
+                            item['grp_key'] = pg.get('group_id') if pg.get('group_id') else f"link_{pg.get('link')}"
+
+                        # Collect unique groups
+                        unique_groups = list(set(item['grp_key'] for item in items))
+                        if len(unique_groups) <= 1:
+                            continue
+
+                        # Collect profiles list for each group
+                        group_profiles = {}
+                        group_page_counts = {}
+                        for item in items:
+                            g = item['grp_key']
+                            group_page_counts[g] = group_page_counts.get(g, 0) + 1
+                            if g not in group_profiles:
+                                group_profiles[g] = set()
+                            for pid in item['p_ids']:
+                                if pid:
+                                    group_profiles[g].add(pid)
+
+                        # Find which groups share each profile
+                        groups_for_profile = {}
+                        for g, pids in group_profiles.items():
+                            for pid in pids:
+                                if pid not in groups_for_profile:
+                                    groups_for_profile[pid] = set()
+                                groups_for_profile[pid].add(g)
+
+                        # Check if any profile has overlap
+                        overlapping_pids = [pid for pid, grps in groups_for_profile.items() if len(grps) > 1]
+                        if overlapping_pids:
+                            self.log("⚠️ Phát hiện dùng chung profile giữa các nhóm. Đang tiến hành phân bổ độc lập...")
+
+                        # Track owned profiles for each group
+                        owned_profiles = {g: set() for g in unique_groups}
+
+                        # Step A: Assign unique profiles first
+                        for pid, grps in list(groups_for_profile.items()):
+                            if len(grps) == 1:
+                                g = list(grps)[0]
+                                owned_profiles[g].add(pid)
+                                del groups_for_profile[pid]
+
+                        # Step B: Assign shared profiles greedily to avoid overlap
+                        shared_pids = list(groups_for_profile.keys())
+                        for pid in shared_pids:
+                            grps = list(groups_for_profile[pid])
+                            def group_sort_key(g):
+                                return (len(owned_profiles[g]), -group_page_counts.get(g, 0), str(g))
+                            grps.sort(key=group_sort_key)
+                            best_g = grps[0]
+                            owned_profiles[best_g].add(pid)
+
+                        # Log the resolved partition for user visibility
+                        if overlapping_pids:
+                            for g in unique_groups:
+                                allowed_pids = owned_profiles[g]
+                                display_names = []
+                                for pid in allowed_pids:
+                                    found_name = pid
+                                    for item in items:
+                                        if item['grp_key'] == g:
+                                            for cur_id, cur_name in zip(item['p_ids'], item['p_names']):
+                                                if cur_id == pid:
+                                                    found_name = cur_name
+                                                    break
+                                    display_names.append(found_name)
+                                    
+                                grp_name = g
+                                if g in group_map:
+                                    grp_name = group_map[g]['name']
+                                elif g.startswith("link_"):
+                                    for item in items:
+                                        if item['grp_key'] == g:
+                                            grp_name = f"Page {item['page_name']}"
+                                            break
+                                            
+                                if display_names:
+                                    self.log(f"🛡️ [Độc lập Profile] Nhóm/Page '{grp_name}' giới hạn chạy trên: {', '.join(display_names)}")
+
+                        # Step C: Filter candidate profiles for each item
+                        for item in items:
+                            g = item['grp_key']
+                            allowed = owned_profiles[g]
+                            
+                            new_p_ids = []
+                            new_p_names = []
+                            for pid, pname in zip(item['p_ids'], item['p_names']):
+                                if pid in allowed:
+                                    new_p_ids.append(pid)
+                                    new_p_names.append(pname)
+                                    
+                            if new_p_ids:
+                                item['p_ids'] = new_p_ids
+                                item['p_names'] = new_p_names
+                    # --- End of Profile Conflict Elimination ---
+
+                    # 2. Sort by number of candidates ascending
+                    work_candidates.sort(key=lambda x: len(x['p_ids']))
+                    
+                    # 3. Load balance and group
+                    profile_groups = {}
+                    profile_counts = {}
+                    
+                    for item in work_candidates:
+                        page = item['page']
+                        b_id = item['b_id']
+                        p_ids = item['p_ids']
+                        p_names = item['p_names']
+                        
+                        # Find candidate with minimum load
+                        chosen_p_id = p_ids[0]
+                        min_load = float('inf')
+                        for pid in p_ids:
+                            load = profile_counts.get((b_id, pid), 0)
+                            if load < min_load:
+                                min_load = load
+                                chosen_p_id = pid
+                                
+                        # Increment load
+                        profile_counts[(b_id, chosen_p_id)] = profile_counts.get((b_id, chosen_p_id), 0) + 1
+                        
+                        # Add to group
+                        key = (b_id, chosen_p_id)
                         if key not in profile_groups:
                             profile_groups[key] = {
                                 'pages': [],
-                                'profile_name': page.get('profile_name', str(p_id))
+                                'profile_name': page.get('profile_name', str(chosen_p_id))
                             }
+                            
+                        # If profile_name contains comma-separated names, try to find matching index
+                        chosen_name = str(chosen_p_id)
+                        if len(p_names) == len(p_ids):
+                            try:
+                                idx_name = p_ids.index(chosen_p_id)
+                                chosen_name = p_names[idx_name]
+                            except: pass
+                        elif p_names:
+                            chosen_name = p_names[0]
+                        
+                        profile_groups[key]['profile_name'] = chosen_name
                         
                         profile_groups[key]['pages'].append({
                             'name': page.get('name'),
                             'link': page.get('link'),
                             'group_id': page.get('group_id', ''),
-                            'folders': folders,
-                            'unposted_files': unposted_files,
-                            'to_comment_historic': to_comment_historic,
+                            'folders': item['folders'],
+                            'unposted_files': item['unposted_files'],
+                            'to_comment_historic': item['to_comment_historic'],
                         })
                     
                     if not profile_groups:

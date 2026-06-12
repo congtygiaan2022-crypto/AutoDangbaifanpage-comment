@@ -1,0 +1,40 @@
+{
+    "profiles": [
+        {
+            "id": 1,
+            "name": "Hip",
+            "db_file": "database.json",
+            "sqlite_file": "system.db"
+        },
+        {
+            "id": 2,
+            "name": "Profile 2",
+            "db_file": "database_2.json",
+            "sqlite_file": "system_2.db"
+        },
+        {
+            "id": 3,
+            "name": "Profile 3",
+            "db_file": "database_3.json",
+            "sqlite_file": "system_3.db"
+        },
+        {
+            "id": 4,
+            "name": "Profile 4",
+            "db_file": "database_4.json",
+            "sqlite_file": "system_4.db"
+        },
+        {
+            "id": 5,
+            "name": "Profile 5",
+            "db_file": "database_5.json",
+            "sqlite_file": "system_5.db"
+        },
+        {
+            "id": 6,
+            "name": "Profile 6",
+            "db_file": "database_6.json",
+            "sqlite_file": "system_6.db"
+        }
+    ]
+}
