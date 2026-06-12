@@ -44,7 +44,7 @@ class App(tk.Tk):
         
         self.db = Database(db_file)
         self.profile_name = profile_name
-        self.title(f"Gams - Auto Post Reel Fanpage v1.1.0 - [{profile_name}]")
+        self.title(f"Gams - Auto Post Reel Fanpage v130626 - [{profile_name}]")
         self.geometry("1200x750")
         self.minsize(1050, 650)
 
