@@ -1543,13 +1543,71 @@ class App(tk.Tk):
             btn_del.bind("<Enter>", on_e)
             btn_del.bind("<Leave>", on_l)
 
+    def ask_multiple_folders_powershell(self, title="Chọn nhiều thư mục"):
+        ps_code = f"""
+Add-Type -AssemblyName System.Windows.Forms
+$ofd = New-Object System.Windows.Forms.OpenFileDialog
+$ofd.Multiselect = $true
+$ofd.CheckFileExists = $false
+$ofd.ValidateNames = $false
+$ofd.FileName = "Chọn thư mục này"
+$ofd.Title = "{title}"
+$ofd.Filter = "Thư mục|*.folder_picker"
+
+$res = $ofd.ShowDialog()
+if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
+    foreach ($file in $ofd.FileNames) {{
+        if ([System.IO.Directory]::Exists($file)) {{
+            Write-Output $file
+        }} else {{
+            $parent = [System.IO.Path]::GetDirectoryName($file)
+            if ([System.IO.Directory]::Exists($parent)) {{
+                Write-Output $parent
+            }}
+        }}
+    }}
+}}
+"""
+        import tempfile
+        import subprocess
+        import os
+        
+        fd, path = tempfile.mkstemp(suffix=".ps1", text=True)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(ps_code)
+                
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                startupinfo=startupinfo
+            )
+            lines = [line.strip() for line in result.stdout.split('\n') if line.strip()]
+            return list(set(lines))
+        except Exception as e:
+            self.log(f"Lỗi khi chọn thư mục: {e}")
+            return []
+        finally:
+            try:
+                os.remove(path)
+            except:
+                pass
+
     def add_folder_to_page(self):
         idx = self.current_selected_page_idx
         if idx is None: return
         
-        folder = filedialog.askdirectory()
-        if folder:
-            self.db.add_folder(idx, folder)
+        folders = self.ask_multiple_folders_powershell("Chọn một hoặc nhiều thư mục video (Bôi đen/Giữ Ctrl để chọn nhiều)")
+        if folders:
+            for folder in folders:
+                self.db.add_folder(idx, folder, save=False)
+            self.db.save()
             self.refresh_detail_folders()
             self.refresh_tree_row(idx)
 
@@ -2137,9 +2195,11 @@ class App(tk.Tk):
                       command=lambda idx=i: self.remove_global_folder_ui(idx)).pack(side="right")
 
     def add_global_folder_ui(self):
-        path = filedialog.askdirectory()
-        if path:
-            self.db.add_global_folder(path)
+        folders = self.ask_multiple_folders_powershell("Chọn một hoặc nhiều thư mục chung (Bôi đen/Giữ Ctrl để chọn nhiều)")
+        if folders:
+            for folder in folders:
+                self.db.add_global_folder(folder, save=False)
+            self.db.save()
             self._refresh_global_folders_ui()
 
     def remove_global_folder_ui(self, index):

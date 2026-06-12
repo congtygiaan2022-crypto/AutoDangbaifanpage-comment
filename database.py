@@ -341,11 +341,12 @@ class Database:
             self.data['fanpages'].pop(index)
             self.save()
 
-    def add_folder(self, page_index, folder_path):
+    def add_folder(self, page_index, folder_path, save=True):
         if 0 <= page_index < len(self.data['fanpages']):
             if folder_path not in self.data['fanpages'][page_index]['folders']:
                 self.data['fanpages'][page_index]['folders'].append(folder_path)
-                self.save()
+                if save:
+                    self.save()
 
     def remove_folder(self, page_index, folder_index):
         if 0 <= page_index < len(self.data['fanpages']):
@@ -368,12 +369,13 @@ class Database:
     def get_global_folders(self):
         return self.data.get('global_folders', [])
 
-    def add_global_folder(self, folder_path):
+    def add_global_folder(self, folder_path, save=True):
         if 'global_folders' not in self.data:
             self.data['global_folders'] = []
         if folder_path not in self.data['global_folders']:
             self.data['global_folders'].append(folder_path)
-            self.save()
+            if save:
+                self.save()
 
     def remove_global_folder(self, index):
         if 'global_folders' in self.data and 0 <= index < len(self.data['global_folders']):
