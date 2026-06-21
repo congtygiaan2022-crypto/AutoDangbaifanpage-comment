@@ -92,6 +92,8 @@ from gemlogin_api import GemLoginAPI
 from gpmlogin_api import GPMLoginAPI
 from facebook_automator import FacebookAutomator, PageAccessDeniedException
 
+global_logger = None
+
 def log(msg):
     # TimestampWriter adds [HH:MM:SS] prefix automatically to every print()
     print(msg, flush=True)
@@ -108,7 +110,11 @@ def is_browser_disconnected_exception(e):
         "no such window",
         "disconnected",
         "active refused",
-        "10061"
+        "10061",
+        "httpconnection",
+        "urllib3",
+        "protocolerror",
+        "socket"
     ]
     return any(ind in err_str for ind in indicators)
 
@@ -173,6 +179,19 @@ def run_worker(job_path):
         # --- Process each page sequentially ---
         total_pages = len(pages)
         for idx, page in enumerate(pages, 1):
+            # Proactive periodic browser restart every 8 pages to prevent memory leaks and crashes
+            if idx > 1 and (idx - 1) % 8 == 0:
+                log(f"[Worker:{profile_label}] Đã xử lý {idx - 1} trang, chủ động khởi động lại trình duyệt để giải phóng bộ nhớ...")
+                try:
+                    if automator:
+                        automator.close()
+                except: pass
+                try:
+                    api.stop_profile(p_id)
+                except: pass
+                automator = None
+                time.sleep(3)
+
             page_name = page.get('name', 'Page_Không_Tên')
             stt = f"[{idx}/{total_pages}]"
             unposted_files = page.get('unposted_files', [])  # list of [folder, filename]

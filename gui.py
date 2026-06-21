@@ -59,6 +59,7 @@ class App(tk.Tk):
         
         # Selection states
         self.current_selected_page_idx = None
+        self.editor_page_idx = None
         self.tree_item_to_idx = {}
 
         # Shopee mode state
@@ -1154,6 +1155,7 @@ class App(tk.Tk):
         
         # 2. Reset editor selection state
         self.current_selected_page_idx = None
+        self.editor_page_idx = None
         self.det_id_lbl.configure(text="CẤU HÌNH FANPAGE #")
         self.placeholder_lbl.pack(fill="both", expand=True)
         self.detail_panel.pack_forget()
@@ -1259,7 +1261,13 @@ class App(tk.Tk):
                         self.show_page_details(db_idx)
 
     def show_page_details(self, db_idx):
+        # Auto-save any pending details/comments for the previous page in editor first
+        if hasattr(self, 'editor_page_idx') and self.editor_page_idx is not None:
+            self.save_current_page_details(self.editor_page_idx)
+            self.save_current_page_comment(self.editor_page_idx)
+
         self.current_selected_page_idx = db_idx
+        self.editor_page_idx = db_idx
         fanpages = self.db.get_fanpages()
         if db_idx >= len(fanpages):
             return
@@ -1347,8 +1355,8 @@ class App(tk.Tk):
         else:
             self.det_profile_combo.set("(Chưa gán Profile)")
 
-    def save_current_page_details(self):
-        idx = self.current_selected_page_idx
+    def save_current_page_details(self, target_idx=None):
+        idx = target_idx if target_idx is not None else self.editor_page_idx
         if idx is None or idx < 0:
             return
             
@@ -1365,8 +1373,8 @@ class App(tk.Tk):
         self.db.update_link(idx, link)
         self.refresh_tree_row(idx)
 
-    def save_current_page_comment(self):
-        idx = self.current_selected_page_idx
+    def save_current_page_comment(self, target_idx=None):
+        idx = target_idx if target_idx is not None else self.editor_page_idx
         if idx is None or idx < 0:
             return
             
