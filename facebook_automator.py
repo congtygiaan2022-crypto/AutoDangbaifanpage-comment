@@ -78,16 +78,29 @@ class FacebookAutomator:
             pass
 
     def resolve_asset_id(self, page_link):
+        # Clean input
+        page_link = str(page_link or "").strip()
+        if not page_link:
+            return None
+
         # Try to find asset_id in URL without navigation first
         asset_id = None
+        
+        # If the input is directly a digit (the ID itself)
+        if page_link.isdigit():
+            return page_link
+
         if "asset_id=" in page_link:
-            asset_id = page_link.split("asset_id=")[-1].split("&")[0]
+            extracted = page_link.split("asset_id=")[-1].split("&")[0]
+            if extracted.isdigit():
+                return extracted
         
         # If it's a direct page ID in URL
-        if not asset_id:
-            parts = page_link.strip("/").split("/")
-            if parts[-1].isdigit():
-                asset_id = parts[-1]
+        parts = page_link.strip("/").split("/")
+        if parts:
+            last_part = parts[-1].split("?")[0]
+            if last_part.isdigit():
+                return last_part
             
         # Must navigate to resolve or confirm
         print(f"[Automator] Navigating to resolve IDs: {page_link}")
@@ -178,8 +191,8 @@ class FacebookAutomator:
         batch_list: List of (video_path, title)
         """
         self.set_timeout()
-        if not upload_url or "bulk_upload_composer" not in upload_url:
-            upload_url = f"https://business.facebook.com/latest/bulk_upload_composer?asset_id={asset_id}"
+        # Mặc định của tool khi đăng bài sẽ dùng link này
+        upload_url = f"https://business.facebook.com/latest/bulk_upload_composer?asset_id={asset_id}"
         
         # 0. Skip redundant navigation if already there
         if upload_url.lower() not in self.driver.current_url.lower():

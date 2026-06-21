@@ -1,0 +1,220 @@
+{
+    "fanpages": [
+        {
+            "stt": 1,
+            "link": "https://business.facebook.com/latest/bulk_upload_composer?asset_id=735453426311731&business_id=4135089430143823&ir_qe_exposed=1",
+            "name": "Du Hành",
+            "folders": [
+                "E:/Gams-YoutubeDownloader/downloads/Du Hành short",
+                "E:/Gams-YoutubeDownloader/downloads/Mạnh Mở Mang short"
+            ],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        },
+        {
+            "stt": 2,
+            "link": "https://business.facebook.com/latest/bulk_upload_composer?asset_id=753545184499687&business_id=4135089430143823&ir_qe_exposed=1",
+            "name": "Đẹp là Beauty",
+            "folders": [
+                "E:/Gams-YoutubeDownloader/downloads/Đẹp là Beauty short"
+            ],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        },
+        {
+            "stt": 3,
+            "link": "https://business.facebook.com/latest/bulk_upload_composer?asset_id=874186082441515&business_id=4135089430143823&ir_qe_exposed=1",
+            "name": "Thế Giới Có Gì Hay",
+            "folders": [
+                "E:/Gams-YoutubeDownloader/downloads/Thế Giới Có Gì Hay short"
+            ],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        },
+        {
+            "stt": 4,
+            "link": "https://business.facebook.com/latest/bulk_upload_composer?asset_id=755942587591854&business_id=4135089430143823&ir_qe_exposed=1",
+            "name": "Gams Auto Post Fanpage",
+            "folders": [],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        },
+        {
+            "stt": 5,
+            "link": "https://business.facebook.com/latest/bulk_upload_composer?asset_id=861738787023201&business_id=4135089430143823&ir_qe_exposed=1",
+            "name": "GYM CỎ",
+            "folders": [
+                "E:/Gams-YoutubeDownloader/downloads/GYM CỎ short"
+            ],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        },
+        {
+            "stt": 6,
+            "link": "https://business.facebook.com/latest/bulk_upload_composer?asset_id=665071770029844&business_id=4135089430143823&ir_qe_exposed=1",
+            "name": "Thuận NVT",
+            "folders": [
+                "E:/Gams-YoutubeDownloader/downloads/Thuận NVT short"
+            ],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        },
+        {
+            "stt": 7,
+            "link": "https://business.facebook.com/latest/bulk_upload_composer?asset_id=716626258197850&business_id=4135089430143823&ir_qe_exposed=1",
+            "name": "Larissa beauty",
+            "folders": [
+                "E:/Gams-YoutubeDownloader/downloads/Larissa beauty short"
+            ],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        },
+        {
+            "stt": 8,
+            "link": "https://business.facebook.com/latest/bulk_upload_composer?asset_id=7776321812237661&business_id=4135089430143823&ir_qe_exposed=1",
+            "name": "Chân Ngắn Beauty",
+            "folders": [
+                "E:/Gams-YoutubeDownloader/downloads/Chân Ngắn Beauty short"
+            ],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        },
+        {
+            "stt": 9,
+            "link": "https://facebook.com/...",
+            "name": "Gams Auto Post Fanpage",
+            "folders": [],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        },
+        {
+            "stt": 10,
+            "link": "https://facebook.com/...",
+            "name": "Gams Auto Post Fanpage",
+            "folders": [],
+            "min_videos": 1,
+            "max_videos": 10,
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1",
+            "group_id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "enabled": true,
+            "comment_template": ""
+        }
+    ],
+    "comment_template": "{Sản phẩm này nhìn khá gọn gàng, thiết kế ổn|Mẫu này đang được nhiều người quan tâm, bạn có thể xem thử|Mình thấy chất lượng ổn so với mức giá|Cái này dùng hằng ngày khá tiện|Mẫu này nhìn đơn giản nhưng dùng rất ok|Sản phẩm này phù hợp nếu bạn đang tìm loại dễ dùng|Nhiều người phản hồi dùng ổn, bạn tham khảo thử|Cái này thiết kế nhìn sạch sẽ, tinh tế|Sản phẩm này đang bán khá chạy|Mình thấy mẫu này dùng khá bền|Nếu bạn đang cân nhắc thì có thể xem thử mẫu này|Sản phẩm này phù hợp để dùng lâu dài|Chất lượng nhìn chung ổn, đáng để tham khảo|Mẫu này dùng đơn giản, không cầu kỳ|Sản phẩm này phù hợp với nhu cầu cơ bản}  https://s.shopee.vn/{7KrA6VMTnm|8AQH5A4LEg|9AIoGvzT9t|BLfrGjSrG|8KhNKBYBlJ|7pqSNvwkhC|809sa0AQUe|5ffTkiYz1c}",
+    "auto_delete_videos": true,
+    "loop_mode": "infinite",
+    "loop_count": 1,
+    "rest_min": 2,
+    "rest_max": 10,
+    "time_start": "00:00",
+    "time_end": "23:59",
+    "theme": "dark",
+    "run_mode": "post_and_comment",
+    "global_folders": [],
+    "global_min_videos": 4,
+    "global_max_videos": 4,
+    "comment_strategies": {
+        "home_scroll": true,
+        "feed_grid": false,
+        "published_panel": false,
+        "published_inline": false,
+        "insight_overview": true,
+        "insight_content": true
+    },
+    "browsers": [
+        {
+            "id": "gemlogin_default",
+            "name": "GemLogin",
+            "type": "gemlogin",
+            "api_url": "http://localhost:1010"
+        },
+        {
+            "id": "gpmlogin_default",
+            "name": "GPMLogin",
+            "type": "gpmlogin",
+            "api_url": "http://127.0.0.1:19995"
+        }
+    ],
+    "max_parallel_workers": 4,
+    "skip_commented": true,
+    "groups": [
+        {
+            "id": "af5f5e92-e213-434b-bda9-0bb426626516",
+            "name": "Fanpage Việt",
+            "browser_id": "gemlogin_default",
+            "profile_id": 1,
+            "profile_name": "Xuan Thang 1"
+        },
+        {
+            "id": "628eaf25-1d9b-4c6d-b3e5-ef873eb550db",
+            "name": "Gams Auto Post Fanpage",
+            "browser_id": "gpmlogin_default",
+            "profile_id": "42577b72-3eb6-40d7-940f-e9c932e4d4e5",
+            "profile_name": "100071526474974"
+        }
+    ],
+    "comment_all_fanpages": true,
+    "shopee_mode": true,
+    "shopee_file": "E:/Gams-Backlink_Shopee/ket_qua2.txt",
+    "shopee_all_groups": true,
+    "shopee_groups": [
+        "af5f5e92-e213-434b-bda9-0bb426626516",
+        "628eaf25-1d9b-4c6d-b3e5-ef873eb550db"
+    ]
+}

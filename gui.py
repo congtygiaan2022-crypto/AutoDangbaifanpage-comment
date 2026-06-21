@@ -547,7 +547,7 @@ class App(tk.Tk):
         self.det_name_entry.bind("<Return>", lambda e: self.save_current_page_details())
         
         # Link Entry
-        tk.Label(inputs_grid, text="Link Fanpage:", bg="#ffffff", font=self.font_bold).grid(row=1, column=0, sticky="w", pady=4)
+        tk.Label(inputs_grid, text="ID Asset:", bg="#ffffff", font=self.font_bold).grid(row=1, column=0, sticky="w", pady=4)
         self.det_link_entry = tk.Entry(inputs_grid, font=self.font_main, bd=1, relief="solid")
         self.det_link_entry.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=4)
         self.det_link_entry.bind("<FocusOut>", lambda e: self.save_current_page_details())
@@ -1354,6 +1354,12 @@ class App(tk.Tk):
             
         name = self.det_name_entry.get().strip()
         link = self.det_link_entry.get().strip()
+        
+        # Extract asset_id parameter from the link if present
+        if "asset_id=" in link:
+            extracted_id = link.split("asset_id=")[-1].split("&")[0]
+            if extracted_id.isdigit():
+                link = extracted_id
         
         self.db.update_fanpage_name(idx, name)
         self.db.update_link(idx, link)
