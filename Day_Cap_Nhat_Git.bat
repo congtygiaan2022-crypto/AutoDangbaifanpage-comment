@@ -22,6 +22,7 @@ git commit -m "%commit_msg%"
 
 echo [+] Buoc 3: Day code len Github...
 echo.
+git branch -M main >nul 2>&1
 git push origin main
 
 if %errorlevel% neq 0 goto PUSH_ERROR
