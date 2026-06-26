@@ -20,6 +20,9 @@ class FacebookAutomator:
         chrome_options.add_experimental_option("debuggerAddress", debugger_address)
         
         self.strategies = strategies or {}
+        # Store for reconnect use
+        self._debugger_address = debugger_address
+        self._driver_path = driver_path
         
         try:
             if driver_path and os.path.exists(driver_path):
@@ -50,6 +53,33 @@ class FacebookAutomator:
         except Exception as e:
             print(f"Error connecting to browser: {e}")
             raise e
+
+    def _reconnect_driver(self, wait_seconds=15):
+        """
+        Re-establishes the WebDriver connection to the same GemLogin Chrome instance.
+        Called after a hard page navigation (e.g. profile switch) kills the session.
+        Returns True on success, False on failure.
+        """
+        print(f"[Automator] Session lost. Waiting {wait_seconds}s for Chrome to finish navigation...")
+        time.sleep(wait_seconds)
+        try:
+            chrome_options = Options()
+            chrome_options.add_experimental_option("debuggerAddress", self._debugger_address)
+            if self._driver_path and os.path.exists(self._driver_path):
+                service = Service(executable_path=self._driver_path)
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            else:
+                self.driver = webdriver.Chrome(options=chrome_options)
+            self.driver.set_page_load_timeout(60)
+            self.driver.set_script_timeout(60)
+            self.driver.implicitly_wait(2)
+            # Quick sanity check
+            _ = self.driver.current_url
+            print(f"[Automator] Reconnected successfully. Current URL: {self.driver.current_url[:80]}")
+            return True
+        except Exception as e:
+            print(f"[Automator] Reconnect failed: {e}")
+            return False
 
     def _check_page_accessibility(self):
         """
@@ -102,6 +132,14 @@ class FacebookAutomator:
             if last_part.isdigit():
                 return last_part
             
+        if asset_id:
+            if "business_id=" in page_link:
+                self.business_id = page_link.split("business_id=")[-1].split("&")[0]
+            else:
+                self.business_id = "1016985112612772"
+            print(f"[Automator] Resolved Asset ID without navigation: {asset_id}")
+            return asset_id
+
         # Must navigate to resolve or confirm
         print(f"[Automator] Navigating to resolve IDs: {page_link}")
         self.driver.get(page_link)
@@ -144,6 +182,29 @@ class FacebookAutomator:
         # Nếu là string đơn lẻ, bọc lại thành list để Bulk xử lý đồng nhất
         batch = video_path if isinstance(video_path, list) else [(video_path, title)]
         return self.upload_reels_bulk(asset_id, batch, upload_url=page_link)
+
+    def _is_browser_disconnected(self, e=None):
+        if e:
+            err_str = str(e).lower()
+            indicators = [
+                "connection refused", 
+                "connectionrefusederror", 
+                "max retries exceeded", 
+                "invalid session id", 
+                "chrome not reachable",
+                "target window already closed",
+                "no such window",
+                "disconnected",
+                "active refused",
+                "10061"
+            ]
+            if any(ind in err_str for ind in indicators):
+                return True
+        try:
+            _ = self.driver.current_url
+            return False
+        except Exception:
+            return True
 
     def log(self, msg):
         print(f"[Automator] {msg}")
@@ -992,10 +1053,105 @@ class FacebookAutomator:
             # Restore implicit wait
             self.driver.implicitly_wait(2)
 
+    def get_reel_url_from_feed_grid(self, asset_id, title_text):
+        """
+        Navigate to Feed & Grid page, find the post by title, then extract
+        the actual public facebook.com/reel/XXXXX URL from the page HTML.
+        This is the MOST RELIABLE way to get the actual reel link.
+        Returns the reel URL string or None if not found.
+        """
+        import re as _re
+        try:
+            feed_url = f"https://business.facebook.com/latest/posts/feed_and_grid?asset_id={asset_id}"
+            print(f"[Automator] [GetReelURL] Navigating to Feed & Grid: {feed_url}")
+            self._safe_get(feed_url)
+            self._wait_for_element(["//div[@role='main']", "//div[@role='article']"], timeout=6)
+            self._close_popups_v2()
+
+            clean_title = self._get_clean_title(title_text)
+
+            # Scroll to find the post (up to 3 attempts)
+            target_post = None
+            for attempt in range(1, 4):
+                target_post = self._find_target_post_element(clean_title)
+                if target_post:
+                    print(f"[Automator] [GetReelURL] Found post on attempt {attempt}.")
+                    break
+                if attempt < 3:
+                    self._robust_js_scroll()
+                    self._wait_for_element(["//div[@role='article']"], timeout=3)
+
+            if not target_post:
+                print(f"[Automator] [GetReelURL] Post not found on Feed & Grid.")
+                return None
+
+            # Strategy 1: Find href link near the post element
+            reel_url = None
+            try:
+                # Look for anchor tags near the post with reel/post/video href
+                nearby_links = target_post.find_elements(By.XPATH,
+                    ".//a[contains(@href, 'facebook.com/reel/') or contains(@href, 'facebook.com/posts/') or contains(@href, 'facebook.com/videos/')]"
+                )
+                for lnk in nearby_links:
+                    href = lnk.get_attribute('href') or ''
+                    if href and 'business.facebook.com' not in href:
+                        reel_url = href
+                        print(f"[Automator] [GetReelURL] ✓ Found via DOM link: {reel_url[:80]}")
+                        break
+            except: pass
+
+            # Strategy 2: Scan full page source near title for facebook.com/reel/
+            if not reel_url:
+                try:
+                    src = self.driver.page_source
+                    # Find title position
+                    title_idx = src.find(clean_title[:30])
+                    if title_idx == -1:
+                        title_idx = src.find(title_text[:30])
+                    if title_idx != -1:
+                        # Search ±15KB around the title
+                        region = src[max(0, title_idx - 5000): min(len(src), title_idx + 10000)]
+                        patterns = [
+                            r'https?://(?:www\.)?facebook\.com/reel/(\d{10,})',
+                            r'https?://(?:www\.)?facebook\.com/[^/]+/videos/(\d{10,})',
+                            r'"permalink_url"\s*:\s*"(https://www\.facebook\.com/reel/[^"]+)"',
+                            r'"video_id"\s*:\s*"(\d{12,})"',
+                        ]
+                        for pat in patterns:
+                            matches = _re.findall(pat, region)
+                            if matches:
+                                candidate = matches[0]
+                                if candidate.startswith('http'):
+                                    reel_url = candidate.replace('\\/', '/')
+                                else:
+                                    reel_url = f"https://www.facebook.com/reel/{candidate}"
+                                print(f"[Automator] [GetReelURL] ✓ Found via page source near title: {reel_url[:80]}")
+                                break
+                except Exception as e:
+                    print(f"[Automator] [GetReelURL] Page source scan error: {e}")
+
+            # Strategy 3: Scan entire page source for any reel URL
+            if not reel_url:
+                try:
+                    src = self.driver.page_source
+                    reel_matches = _re.findall(r'https?://(?:www\.)?facebook\.com/reel/(\d{10,})', src)
+                    if reel_matches:
+                        # Take the first (most likely the relevant one)
+                        reel_url = f"https://www.facebook.com/reel/{reel_matches[0]}"
+                        print(f"[Automator] [GetReelURL] ✓ Found via full-page scan: {reel_url[:80]}")
+                except: pass
+
+            return reel_url
+
+        except Exception as e:
+            print(f"[Automator] [GetReelURL] Error: {e}")
+            return None
+
     def comment_in_feed_grid(self, asset_id, title_text, comment_template):
         """
         Primary Strategy: Comment directly on the Feed and Grid page.
         Enhanced with robust selectors and better scrolling.
+
         """
         try:
             url = f"https://business.facebook.com/latest/posts/feed_and_grid?asset_id={asset_id}"
@@ -1155,7 +1311,7 @@ class FacebookAutomator:
                     try:
                         if abs(l.location['y'] - title_y) < 400:
                             href = l.get_attribute("href")
-                            if "facebook.com" in href:
+                            if "facebook.com" in href and "business.facebook.com" not in href:
                                 post_link = href
                                 break
                     except: continue
@@ -1164,7 +1320,8 @@ class FacebookAutomator:
             return True, post_link
 
         except Exception as e:
-            print(f"[Automator] [Primary] Error during Feed \u0026 Grid comment: {e}")
+            print(f"[Automator] [Primary] Error during Feed & Grid comment: {e}")
+            if self._is_browser_disconnected(e): raise e
             return False, None
 
     def _verify_comment_posted(self):
@@ -1183,6 +1340,8 @@ class FacebookAutomator:
         ]
         
         for attempt in range(3):
+            if attempt > 0:
+                time.sleep(3)
             print(f"[Automator] Verification attempt {attempt+1}/3...")
             # Event-driven: check immediately, wait up to 3s between tries
             self.driver.implicitly_wait(0)
@@ -1327,9 +1486,10 @@ class FacebookAutomator:
 
         except Exception as e:
             print(f"[Automator] [Tier3] Error: {e}")
+            if self._is_browser_disconnected(e): raise e
             return False, None
 
-    def comment_in_insights_overview(self, asset_id, title_text, comment_template):
+    def comment_in_insights_overview(self, asset_id, title_text, comment_template, page_name=None):
         """
         Tier 4: Comment via Insights Overview.
         Navigates to Insights Overview, finds the post, opens panel, and posts comment.
@@ -1378,7 +1538,7 @@ class FacebookAutomator:
                 return False, None
             
             print("[Automator] [Tier4] Panel opened. Attempting to comment...")
-            success = self.post_comment_on_panel(comment_template)
+            success = self.post_comment_on_panel(comment_template, page_name=page_name)
             
             link = None
             if success:
@@ -1386,7 +1546,7 @@ class FacebookAutomator:
                     links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]")
                     for l in links:
                         href = l.get_attribute("href")
-                        if href and "facebook.com" in href:
+                        if href and "facebook.com" in href and "business.facebook.com" not in href:
                             link = href
                             break
                 except: pass
@@ -1395,9 +1555,10 @@ class FacebookAutomator:
 
         except Exception as e:
             print(f"[Automator] [Tier4] Error: {e}")
+            if self._is_browser_disconnected(e): raise e
             return False, None
 
-    def comment_in_insights_base(self, asset_id, title_text, comment_template):
+    def comment_in_insights_base(self, asset_id, title_text, comment_template, page_name=None):
         """
         Tier 5: Comment via Base Insights Content.
         Navigates to Insights Content, finds the post, opens panel, and posts comment.
@@ -1439,7 +1600,7 @@ class FacebookAutomator:
                 return False, None
             
             print("[Automator] [Tier5] Panel opened. Attempting to comment...")
-            success = self.post_comment_on_panel(comment_template)
+            success = self.post_comment_on_panel(comment_template, page_name=page_name)
             
             link = None
             if success:
@@ -1447,7 +1608,7 @@ class FacebookAutomator:
                     links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]")
                     for l in links:
                         href = l.get_attribute("href")
-                        if href and "facebook.com" in href:
+                        if href and "facebook.com" in href and "business.facebook.com" not in href:
                             link = href
                             break
                 except: pass
@@ -1456,9 +1617,10 @@ class FacebookAutomator:
 
         except Exception as e:
             print(f"[Automator] [Tier5] Error: {e}")
+            if self._is_browser_disconnected(e): raise e
             return False, None
 
-    def comment_via_home_scroll(self, asset_id, title_text, comment_template):
+    def comment_via_home_scroll(self, asset_id, title_text, comment_template, page_name=None):
         """
         New Tier: Navigate to Home -> Scroll 10 times -> find post -> comment.
         Requirement updates: 10 scrolls, 6s delay, Back button navigation.
@@ -1509,7 +1671,7 @@ class FacebookAutomator:
                 
             self._close_popups_v2()
             print("[Automator] [HomeTier] Panel opened. Attempting to comment...")
-            success = self.post_comment_on_panel(comment_template)
+            success = self.post_comment_on_panel(comment_template, page_name=page_name, title_text=title_text, asset_id=asset_id)
             
             # Click Back button instead of reloading the page (Requirement 3)
             print("[Automator] [HomeTier] Comment finished. Clicking Back button to return to feed...")
@@ -1518,19 +1680,23 @@ class FacebookAutomator:
             
             link = None
             if success:
+                self.driver.implicitly_wait(0)
                 try:
                     links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]")
                     for l in links:
                         href = l.get_attribute("href")
-                        if href and "facebook.com" in href:
+                        if href and "facebook.com" in href and "business.facebook.com" not in href:
                             link = href
                             break
                 except: pass
+                finally:
+                    self.driver.implicitly_wait(10)
             
             return success, link
 
         except Exception as e:
             print(f"[Automator] [HomeTier] Error: {e}")
+            if self._is_browser_disconnected(e): raise e
             return False, None
 
     def _click_back_button_v2(self):
@@ -1547,6 +1713,7 @@ class FacebookAutomator:
             "//div[@role='button'][@aria-label='Close' or @aria-label='Đóng']"
         ]
         
+        self.driver.implicitly_wait(0)
         try:
             # Prefer buttons on the left side (x < 500)
             for sel in back_selectors:
@@ -1578,8 +1745,10 @@ class FacebookAutomator:
         except Exception as e:
             print(f"[Automator] Error clicking back button: {e}")
             return False
+        finally:
+            self.driver.implicitly_wait(10)
 
-    def comment_with_dual_strategy(self, asset_id, title_text, comment_template):
+    def comment_with_dual_strategy(self, asset_id, title_text, comment_template, page_name=None):
         """
         Dynamically executes enabled commenting strategies in priority order.
         Respects the 'comment_strategies' configuration from the UI.
@@ -1587,12 +1756,12 @@ class FacebookAutomator:
         
         # Define all available strategies in priority order
         strategy_map = [
-            ("home_scroll", "Home Scroll Page", self.comment_via_home_scroll),
-            ("feed_grid", "Feed & Grid Page", self.comment_in_feed_grid),
-            ("published_panel", "Published Posts (Panel)", lambda a, t, c: self._backup_panel_flow(a, t, c)),
-            ("published_inline", "Published Posts (Inline)", self.comment_in_published_posts_inline),
-            ("insight_overview", "Insights Overview", self.comment_in_insights_overview),
-            ("insight_content", "Insights Content", self.comment_in_insights_base)
+            ("home_scroll", "Home Scroll Page", lambda a, t, c, pn=None: self.comment_via_home_scroll(a, t, c, pn)),
+            ("feed_grid", "Feed & Grid Page", lambda a, t, c, pn=None: self.comment_in_feed_grid(a, t, c)),
+            ("published_panel", "Published Posts (Panel)", lambda a, t, c, pn=None: self._backup_panel_flow(a, t, c, pn)),
+            ("published_inline", "Published Posts (Inline)", lambda a, t, c, pn=None: self.comment_in_published_posts_inline(a, t, c)),
+            ("insight_overview", "Insights Overview", lambda a, t, c, pn=None: self.comment_in_insights_overview(a, t, c, pn)),
+            ("insight_content", "Insights Content", lambda a, t, c, pn=None: self.comment_in_insights_base(a, t, c, pn))
         ]
 
         active_strategies = []
@@ -1618,7 +1787,7 @@ class FacebookAutomator:
             try:
                 # Most functions take (asset_id, title_text, comment_template)
                 # Some are lambda wrappers
-                success, link = func(asset_id, title_text, comment_template)
+                success, link = func(asset_id, title_text, comment_template, page_name)
                 
                 if self._check_for_block():
                     print(f"[Automator] ⚠️ Facebook temporary block detected after {name} attempt!")
@@ -1631,24 +1800,25 @@ class FacebookAutomator:
                 print(f"[Automator] ✗ Strategy {name} failed. Moving to next...")
             except Exception as e:
                 print(f"[Automator] ! Error in Strategy {name}: {e}")
+                if self._is_browser_disconnected(e): raise e
             
             time.sleep(5) # Small gap between tiers
 
         print("[Automator] All enabled strategies failed.")
         return False, None
 
-    def _backup_panel_flow(self, asset_id, title_text, comment_template):
+    def _backup_panel_flow(self, asset_id, title_text, comment_template, page_name=None):
         """ Helper for Published Posts Panel strategy """
         panel_opened = self.find_and_open_post(asset_id, title_text)
         if panel_opened:
-            success = self.post_comment_on_panel(comment_template)
+            success = self.post_comment_on_panel(comment_template, page_name=page_name, title_text=title_text, asset_id=asset_id)
             if success:
                 link = None
                 try:
                     links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/reel/') or contains(@href, '/videos/')]")
                     for l in links:
                         href = l.get_attribute("href")
-                        if href and "facebook.com" in href:
+                        if href and "facebook.com" in href and "business.facebook.com" not in href:
                             link = href
                             break
                 except: pass
@@ -1702,9 +1872,636 @@ class FacebookAutomator:
         except:
             return False
 
-    def post_comment_on_panel(self, comment_template):
+    def comment_on_facebook_com(self, page_name, comment_template, post_link):
+        """
+        Navigates to facebook.com post page, switches profile to the correct page name,
+        and posts the comment.
+        """
+        try:
+            print(f"[Automator] Navigating to Facebook post page: {post_link}")
+            self._safe_get(post_link)
+            time.sleep(5)
+            self._close_popups_v2()
+
+            # Check if we are already acting as the target page to avoid redundant switching
+            already_active = False
+            profile_selectors = [
+                "//div[@role='banner']//div[@aria-label='Your profile' or @aria-label='Trang cá nhân của bạn' or contains(@aria-label, 'profile') or contains(@aria-label, 'cá nhân')][@role='button']",
+                "//div[@role='banner']//div[@role='button'][descendant::image or descendant::svg]",
+                "//div[@role='banner']//div[@role='button'][@aria-haspopup='menu']",
+                "//div[@aria-label='Your profile' or @aria-label='Trang cá nhân của bạn' or contains(@aria-label, 'profile') or contains(@aria-label, 'cá nhân')][@role='button']",
+                "//div[contains(@class, 'x1iyjqo2')]//div[@role='button' and @aria-haspopup='menu']"
+            ]
+            for sel in profile_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, sel)
+                    for el in elements:
+                        if el.is_displayed():
+                            aria_label = el.get_attribute("aria-label") or ""
+                            if page_name.lower() in aria_label.lower():
+                                already_active = True
+                                break
+                except: pass
+                if already_active: break
+
+            profile_btn = None
+            if already_active:
+                print(f"[Automator] Already acting as '{page_name}' (detected via profile button aria-label). Skipping switch.")
+            else:
+                print(f"[Automator] [BƯỚC 2] Bấm icon trên cùng bên phải để mở menu tài khoản switcher...")
+                # Click the top-right profile button
+                for sel in profile_selectors:
+                    try:
+                        elements = self.driver.find_elements(By.XPATH, sel)
+                        for el in elements:
+                            if el.is_displayed():
+                                profile_btn = el
+                                break
+                    except: pass
+                    if profile_btn: break
+
+                if profile_btn:
+                    try:
+                        profile_btn.click()
+                    except:
+                        self.driver.execute_script("arguments[0].click();", profile_btn)
+                    time.sleep(3)
+                else:
+                    print("[Automator] Warning: Profile switcher button at top right not found. Attempting comment directly...")
+                    # We will still proceed to comment directly
+                
+            # If the profile switcher menu opened, look for target page_name
+            if profile_btn and not already_active:
+                target_profile = None
+                # First check if the page name is visible directly in the first menu screen
+                direct_selectors = [
+                    f"//div[@role='menu']//span[text()='{page_name}']",
+                    f"//div[@role='menu']//*[text()='{page_name}']",
+                    f"//div[@role='menu']//span[contains(text(), '{page_name}')]",
+                    f"//div[@role='menu']//*[contains(text(), '{page_name}')]"
+                ]
+                for sel in direct_selectors:
+                    try:
+                        elements = self.driver.find_elements(By.XPATH, sel)
+                        for el in elements:
+                            if el.is_displayed():
+                                # Try to get ancestor button/link
+                                try:
+                                    parent = el.find_element(By.XPATH, "./ancestor::div[@role='button' or @role='link' or @role='listitem' or @role='menuitem']")
+                                    target_profile = parent
+                                except:
+                                    target_profile = el
+                                break
+                    except: pass
+                    if target_profile: break
+
+                # If not found directly, look for "See all profiles" to open switcher list
+                if not target_profile:
+                    see_all_btn = None
+                    see_all_selectors = [
+                        "//div[@role='menu']//*[contains(text(), 'See all profiles') or contains(text(), 'Xem tất cả trang cá nhân') or contains(text(), 'Xem tất cả profile')]",
+                        "//div[@role='menu']//*[contains(text(), 'Xem tất cả') or contains(text(), 'See all')]",
+                        "//*[contains(text(), 'See all profiles') or contains(text(), 'Xem tất cả trang cá nhân')]"
+                    ]
+                    for sel in see_all_selectors:
+                        try:
+                            elements = self.driver.find_elements(By.XPATH, sel)
+                            for el in elements:
+                                if el.is_displayed():
+                                    see_all_btn = el
+                                    break
+                        except: pass
+                        if see_all_btn: break
+
+                    if see_all_btn:
+                        print("[Automator] Clicking 'See all profiles'...")
+                        try:
+                            see_all_btn.click()
+                        except:
+                            self.driver.execute_script("arguments[0].click();", see_all_btn)
+                        time.sleep(3)
+
+                        # Search input handling to filter profiles
+                        try:
+                            search_input_selectors = [
+                                "//input[@placeholder='Search profiles and Pages']",
+                                "//input[@aria-label='Search profiles and Pages']",
+                                "//input[contains(@placeholder, 'Search profiles')]",
+                                "//input[contains(@aria-label, 'Search profiles')]",
+                                "//input[contains(@placeholder, 'Tìm kiếm')]"
+                            ]
+                            search_input = None
+                            for s_sel in search_input_selectors:
+                                try:
+                                    elems = self.driver.find_elements(By.XPATH, s_sel)
+                                    for el in elems:
+                                        if el.is_displayed():
+                                            search_input = el
+                                            break
+                                except: pass
+                                if search_input: break
+                                
+                            if search_input:
+                                print(f"[Automator] Found profile search input. Searching for '{page_name}'...")
+                                try:
+                                    search_input.click()
+                                except:
+                                    self.driver.execute_script("arguments[0].click();", search_input)
+                                time.sleep(0.5)
+                                from selenium.webdriver.common.keys import Keys
+                                search_input.send_keys(Keys.CONTROL + "a")
+                                search_input.send_keys(Keys.BACKSPACE)
+                                time.sleep(0.2)
+                                search_input.send_keys(page_name)
+                                time.sleep(2.5)
+                        except Exception as s_err:
+                            print(f"[Automator] Search input handling failed: {s_err}")
+
+                        # Now look in the full switcher list
+                        profile_list_selectors = [
+                            f"//span[text()='{page_name}']",
+                            f"//*[text()='{page_name}']",
+                            f"//span[contains(text(), '{page_name}')]",
+                            f"//*[contains(text(), '{page_name}')]"
+                        ]
+                        for sel in profile_list_selectors:
+                            try:
+                                elements = self.driver.find_elements(By.XPATH, sel)
+                                for el in elements:
+                                    if el.is_displayed():
+                                        try:
+                                            parent = el.find_element(By.XPATH, "./ancestor::div[@role='button' or @role='link' or @role='listitem' or @role='menuitem']")
+                                            target_profile = parent
+                                        except:
+                                            target_profile = el
+                                        break
+                            except: pass
+                            if target_profile: break
+
+                if target_profile:
+                    print(f"[Automator] [BƯỚC 3] Tìm đúng tên fanpage '{page_name}' và bấm chuyển đổi...")
+                    session_ok = True
+                    try:
+                        target_profile.click()
+                    except Exception as click_err:
+                        err_str = str(click_err).lower()
+                        if "invalid session" in err_str or "session deleted" in err_str:
+                            # Hard navigation killed the session — Chrome is still alive but
+                            # the WebDriver connection dropped. Reconnect and continue.
+                            print(f"[Automator] Session dropped during profile click (expected). Reconnecting...")
+                            session_ok = self._reconnect_driver(wait_seconds=15)
+                        else:
+                            print(f"[Automator] Native click failed: {click_err}. Trying JS click...")
+                            try:
+                                self.driver.execute_script("arguments[0].click();", target_profile)
+                            except Exception as js_err:
+                                err_str2 = str(js_err).lower()
+                                if "invalid session" in err_str2 or "session deleted" in err_str2:
+                                    print(f"[Automator] Session dropped during JS profile click. Reconnecting...")
+                                    session_ok = self._reconnect_driver(wait_seconds=15)
+                                else:
+                                    print(f"[Automator] JS click also failed: {js_err}")
+                                    session_ok = False
+                    
+                    if not session_ok:
+                        print("[Automator] Could not reconnect after profile switch. Aborting.")
+                        return False
+
+                    # After profile switch (or reconnect), navigate back to the target post
+                    print(f"[Automator] Profile switch completed. Navigating back to target post link: {post_link}")
+                    try:
+                        self._safe_get(post_link)
+                        time.sleep(5)
+                        self._close_popups_v2()
+                    except Exception as nav_err:
+                        err_str3 = str(nav_err).lower()
+                        if "invalid session" in err_str3 or "session deleted" in err_str3:
+                            print("[Automator] Session dropped during post-switch navigation. Reconnecting...")
+                            if self._reconnect_driver(wait_seconds=10):
+                                self._safe_get(post_link)
+                                time.sleep(5)
+                                self._close_popups_v2()
+                            else:
+                                return False
+                        else:
+                            print(f"[Automator] Navigation error after switch: {nav_err}")
+
+                else:
+                    print(f"[Automator] Target page '{page_name}' not found in switcher. Assuming already active. Navigating back to post...")
+                    # KHÔNG nhấn ESC vì sẽ đóng reel modal trên facebook.com
+                    # Thay vào đó navigate lại về post URL để đảm bảo ở đúng trang
+                    try:
+                        self._safe_get(post_link)
+                        time.sleep(4)
+                        self._close_popups_v2()
+                    except Exception as nav_err:
+                        print(f"[Automator] Navigate back error: {nav_err}")
+
+
+            # Cuộn trang để khu vực comment hiện ra (quan trọng với reel page)
+            try:
+                self.driver.execute_script("window.scrollBy(0, 300);")
+                time.sleep(1.5)
+            except: pass
+
+            # Locate comment box
+            comment_box = None
+            comment_box_selectors = [
+                # Reel-specific: comment box as/under page name
+                "//div[@role='textbox'][contains(@aria-label, 'comment') or contains(@aria-label, 'bình luận') or contains(@aria-label, 'tư cách') or contains(@aria-label, 'dưới tên') or contains(@aria-label, 'Comment as')]",
+                "//div[@aria-placeholder='Write a comment…' or @aria-placeholder='Viết bình luận…' or @aria-placeholder='Viết bình luận...' or @aria-placeholder='Write a comment...']",
+                "//div[@role='textbox'][@contenteditable='true']",
+                "//div[contains(@class, 'comment')]//div[@role='textbox']",
+                "//form//div[@role='textbox']",
+                "//div[@role='textbox']"
+            ]
+
+            # First check with short timeout
+            found, comment_box = self._wait_for_element(comment_box_selectors, timeout=5)
+
+            if not comment_box:
+                print("[Automator] Comment box not immediately visible. Trying Comment button...")
+                comment_btn_selectors = [
+                    # Reel page: speech bubble / comment icon buttons
+                    "//div[@aria-label='Comment' or @aria-label='Bình luận'][@role='button']",
+                    "//*[@aria-label='Comment' or @aria-label='Bình luận'][@role='button']",
+                    "//div[@role='button'][contains(@aria-label, 'Comment') or contains(@aria-label, 'Bình luận')]",
+                    # Text-based
+                    "//span[text()='Comment' or text()='Bình luận']/ancestor::div[@role='button']",
+                    "//div[@role='button'][contains(., 'Comment') or contains(., 'Bình luận')]",
+                    # SVG icon buttons (reel action bar on right side)
+                    "//div[@role='button'][descendant::*[name()='svg']][position() <= 5]",
+                    # Any clickable with comment-like aria
+                    "//*[contains(@aria-label, 'comment') or contains(@aria-label, 'bình luận')][@role='button' or @role='link']",
+                ]
+                comment_btn = None
+                self.driver.implicitly_wait(0)
+                try:
+                    for sel in comment_btn_selectors:
+                        try:
+                            elems = self.driver.find_elements(By.XPATH, sel)
+                            for el in elems:
+                                try:
+                                    if el.is_displayed():
+                                        comment_btn = el
+                                        print(f"[Automator] Found comment button via: {sel[:60]}")
+                                        break
+                                except: continue
+                        except: pass
+                        if comment_btn: break
+                finally:
+                    self.driver.implicitly_wait(10)
+
+                if comment_btn:
+                    try:
+                        print("[Automator] Clicking Comment button to open drawer...")
+                        comment_btn.click()
+                        time.sleep(3)
+                    except Exception as click_err:
+                        try:
+                            self.driver.execute_script("arguments[0].click();", comment_btn)
+                            time.sleep(3)
+                        except:
+                            print(f"[Automator] Failed to click comment button: {click_err}")
+                else:
+                    print("[Automator] Comment button not found. Trying page scroll to reveal comment area...")
+                    # Scroll down more aggressively - reel comments may be below fold
+                    for scroll_px in [500, 800, 1200]:
+                        try:
+                            self.driver.execute_script(f"window.scrollTo(0, {scroll_px});")
+                            time.sleep(2)
+                            found, comment_box = self._wait_for_element(comment_box_selectors, timeout=3)
+                            if comment_box:
+                                print(f"[Automator] Comment box found after scrolling to {scroll_px}px!")
+                                break
+                        except: pass
+
+            if not comment_box:
+                found, comment_box = self._wait_for_element(comment_box_selectors, timeout=15)
+
+            if not comment_box:
+                print("[Automator] Error: Comment textbox on facebook.com not found.")
+                return False
+
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", comment_box)
+            time.sleep(1.5)
+            self.driver.execute_script("arguments[0].click();", comment_box)
+            time.sleep(0.5)
+
+            # Spin and clear emojis
+            spun_comment = self._spin_text(comment_template)
+            spun_comment = "".join(c for c in spun_comment if ord(c) <= 0xFFFF)
+
+            print(f"[Automator] [BƯỚC 4] Chuyển xong, bắt đầu comment bài viết đã đăng: {spun_comment}")
+            from selenium.webdriver.common.keys import Keys
+            
+            # Select all and clear
+            try:
+                comment_box.send_keys(Keys.CONTROL + "a")
+                comment_box.send_keys(Keys.BACKSPACE)
+                time.sleep(0.2)
+            except: pass
+
+            lines = spun_comment.split('\n')
+            for i, line in enumerate(lines):
+                comment_box.send_keys(line)
+                if i < len(lines) - 1:
+                    comment_box.send_keys(Keys.SHIFT + Keys.ENTER)
+
+            time.sleep(1)
+            comment_box.send_keys(Keys.ENTER)
+
+            # Fallback submit button click
+            post_btn_selectors = [
+                "//div[@role='button'][@aria-label='Đăng' or @aria-label='Post' or @aria-label='Bình luận' or @aria-label='Send']",
+                "//div[@role='button'][contains(., 'Đăng') or contains(., 'Post') or contains(., 'Bình luận')]",
+                "//div[@role='textbox']/following-sibling::div//div[@role='button']"
+            ]
+            try:
+                for sel in post_btn_selectors:
+                    btns = self.driver.find_elements(By.XPATH, sel)
+                    for b in btns:
+                        if b.is_displayed():
+                            print(f"[Automator] Clicking post button: {sel}")
+                            self.driver.execute_script("arguments[0].click();", b)
+                            time.sleep(1)
+                            break
+            except Exception as e:
+                print(f"[Automator] Error clicking post button: {e}")
+
+            time.sleep(2)
+            verified = self._verify_comment_posted()
+            if verified:
+                print("[Automator] Comment posted on facebook.com successfully (verified via Remove Preview)!")
+                return True
+            else:
+                print("[Automator] Warning: Could not verify comment posting via 'Remove preview' text, but proceeding.")
+                return True
+
+        except Exception as e:
+            print(f"[Automator] Error commenting on facebook.com: {e}")
+            if self._is_browser_disconnected(e): raise e
+            return False
+
+    def extract_post_id_from_page_source(self, page_source, title_text):
+        import json
+        import re
+        try:
+            # Clean title to match standard normalization in cache
+            clean_title = re.sub(r'#\w+', '', title_text)
+            clean_title = "".join(c for c in clean_title if ord(c) <= 0xFFFF)
+            clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+            
+            # Escape to match React cache unicode escapes
+            escaped_title = json.dumps(clean_title).strip('"')
+            
+            search_terms = [escaped_title]
+            if len(clean_title) > 30:
+                short_title = clean_title[:30]
+                search_terms.append(json.dumps(short_title).strip('"'))
+                
+            idx = -1
+            for term in search_terms:
+                idx = page_source.find(term)
+                if idx != -1:
+                    break
+                    
+            if idx == -1:
+                print(f"[Automator] Escaped title '{escaped_title}' not found in page source.")
+                return None
+                
+            # Search context region (5KB before and after)
+            start_pos = max(0, idx - 5000)
+            end_pos = min(len(page_source), idx + 5000)
+            region = page_source[start_pos:end_pos]
+            
+            # Match entity_id first (most reliable public post ID)
+            id_match = re.search(r'"entity_id"\s*:\s*["\'](\d+)["\']', region)
+            if id_match:
+                return id_match.group(1)
+
+            id_match = re.search(r'"video_id"\s*:\s*["\'](\d+)["\']', region)
+            if id_match:
+                return id_match.group(1)
+                
+            id_match = re.search(r'"id"\s*:\s*["\'](\d+)["\']', region)
+            if id_match:
+                return id_match.group(1)
+
+            # Match business_content_id as a fallback
+            id_match = re.search(r'"business_content_id"\s*:\s*["\'](\d+)["\']', region)
+            if id_match:
+                return id_match.group(1)
+        except Exception as ex:
+            print(f"[Automator] Error in extract_post_id_from_page_source: {ex}")
+        return None
+
+    def post_comment_on_panel(self, comment_template, page_name=None, title_text=None, asset_id=None):
         if not comment_template: return False
         
+        # Try new facebook.com switcher commenting flow if page_name is provided
+        if page_name:
+            print(f"[Automator] page_name provided: '{page_name}'. Commencing post link resolution...")
+            
+            post_link = None
+            original_window = self.driver.current_window_handle
+            windows_before = self.driver.window_handles
+            clicked_link = False
+            
+            # ── STEP 1: Extract post ID from current URL ─────────────────────────
+            import re as _re
+            try:
+                cur_url = self.driver.current_url
+                print(f"[Automator] Current URL after panel open: {cur_url[:120]}")
+                # ONLY match unambiguously public URL patterns:
+                # /reel/XXXXX, /posts/XXXXX, /videos/XXXXX
+                # Do NOT use content_id= (too broad - matches ir_content_id which is internal)
+                url_id_patterns = [
+                    r'(?<![a-z_/])reel[/_](\d{10,})',
+                    r'/posts/(\d{10,})',
+                    r'/videos/(\d{10,})',
+                    r'(?<![a-z_])post_id=(\d{10,})',
+                    r'(?<![a-z_])video_id=(\d{10,})',
+                ]
+                for pat in url_id_patterns:
+                    m = _re.search(pat, cur_url)
+                    if m:
+                        found_id = m.group(1)
+                        post_link = f"https://www.facebook.com/reel/{found_id}"
+                        print(f"[Automator] ✓ Extracted public post ID {found_id} from URL → {post_link}")
+                        break
+            except Exception as url_err:
+                print(f"[Automator] URL extraction error: {url_err}")
+
+            # ── STEP 2: Get actual reel URL from Feed & Grid page ─────────────────
+            # Business Suite insights page does NOT contain the public reel link.
+            # Feed & Grid page reliably embeds the facebook.com/reel/XXXXX URL in its HTML.
+            if not post_link:
+                print(f"[Automator] Fetching actual reel URL from Feed & Grid page...")
+                try:
+                    # Use explicitly passed asset_id first; fall back to URL extraction
+                    _asset_id = str(asset_id) if asset_id else None
+                    if not _asset_id:
+                        cur_url = self.driver.current_url
+                        asset_id_match = _re.search(r'asset_id=(\d+)', cur_url)
+                        if asset_id_match:
+                            _asset_id = asset_id_match.group(1)
+                        else:
+                            print(f"[Automator] Cannot extract asset_id from URL: {cur_url[:80]}")
+                    if _asset_id:
+                        reel_url = self.get_reel_url_from_feed_grid(_asset_id, title_text or "")
+                        if reel_url:
+                            post_link = reel_url
+                            print(f"[Automator] ✓ Got reel URL from Feed & Grid: {post_link[:80]}")
+                        else:
+                            print(f"[Automator] Feed & Grid did not find reel URL.")
+                except Exception as fg_err:
+                    print(f"[Automator] Feed & Grid lookup error: {fg_err}")
+
+
+            # If we resolved post_link, open a new tab and navigate to it
+            if post_link and not clicked_link:
+                try:
+                    print(f"[Automator] Opening new tab to navigate to post link: {post_link}")
+                    self.driver.switch_to.new_window('tab')
+                    time.sleep(1.0)
+                    # Navigate to the resolved post link inside the new tab
+                    self._safe_get(post_link)
+                    time.sleep(3)
+                    print(f"[Automator] Opened new tab and navigated to: {post_link[:80]}")
+                    clicked_link = True
+                except Exception as tab_err:
+                    print(f"[Automator] Failed to open/navigate new tab: {tab_err}.")
+
+            # ── STEP 4: DOM element search for 'View reel on Facebook' button ─────
+            if not clicked_link and not post_link:
+                print(f"[Automator] DOM search: locating 'View reel on Facebook' button in details panel...")
+
+                def is_valid_fb_post_link(url_str):
+                    low = url_str.lower()
+                    if "/latest/" in low or "published_posts" in low or "scheduled_posts" in low or "drafts" in low:
+                        return False
+                    return any(x in low for x in ["/reel/", "/videos/", "/posts/"])
+
+                btn_selectors = [
+                    "//a[contains(., 'Xem thước phim trên Facebook') or contains(., 'View reel on Facebook')]",
+                    "//a[contains(., 'Xem bài viết trên Facebook') or contains(., 'View post on Facebook')]",
+                    "//a[contains(., 'Xem trên Facebook') or contains(., 'View on Facebook')]",
+                    "//*[contains(text(), 'View reel on Facebook') or contains(text(), 'Xem thước phim trên Facebook')]",
+                    "//a[contains(@href, 'facebook.com/reel/') or contains(@href, 'facebook.com/posts/') or contains(@href, 'facebook.com/videos/')]",
+                    "//a[contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]",
+                ]
+
+                link_btn = None
+                self.driver.implicitly_wait(0)
+                try:
+                    for sel in btn_selectors:
+                        try:
+                            elements = self.driver.find_elements(By.XPATH, sel)
+                            for el in elements:
+                                try:
+                                    href = el.get_attribute("href") or ""
+                                    if not href:
+                                        try:
+                                            ancestor_a = el.find_element(By.XPATH, "./ancestor::a")
+                                            href = ancestor_a.get_attribute("href") or ""
+                                        except: pass
+                                    if is_valid_fb_post_link(href):
+                                        link_btn = el
+                                        post_link = href.replace("business.facebook.com", "www.facebook.com") if "business.facebook.com" in href else href
+                                        print(f"[Automator] ✓ Found DOM link: {post_link[:80]}")
+                                        break
+                                except: continue
+                        except: pass
+                        if link_btn: break
+                finally:
+                    self.driver.implicitly_wait(10)
+
+                if link_btn:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", link_btn)
+                        time.sleep(4)
+                        windows_after = self.driver.window_handles
+                        if len(windows_after) > len(windows_before):
+                            new_tab = [w for w in windows_after if w not in windows_before][0]
+                            self.driver.switch_to.window(new_tab)
+                            print("[Automator] Switched to new tab opened by button click.")
+                            for _ in range(5):
+                                if "facebook.com" in self.driver.current_url:
+                                    break
+                                time.sleep(1)
+                        clicked_link = True
+                    except Exception as click_err:
+                        print(f"[Automator] Click failed: {click_err}.")
+
+                # Last resort: all links in page
+                if not clicked_link and not post_link:
+                    self.driver.implicitly_wait(0)
+                    try:
+                        links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]")
+                        for l in links:
+                            href = l.get_attribute("href") or ""
+                            if href:
+                                mapped = href.replace("business.facebook.com", "www.facebook.com")
+                                if is_valid_fb_post_link(mapped):
+                                    post_link = mapped
+                                    break
+                    except Exception as e:
+                        print(f"[Automator] Error extracting link: {e}")
+                    finally:
+                        self.driver.implicitly_wait(10)
+            
+            if clicked_link or post_link:
+                # Always use the resolved post_link; never fall back to driver.current_url
+                # (which could be the blank new tab URL)
+                target_url = post_link
+                if not target_url:
+                    print("[Automator] No post_link resolved — cannot comment.")
+                    return False
+                print(f"[Automator] Target post page: {target_url}. Commencing commenting flow...")
+                
+                success = self.comment_on_facebook_com(page_name, comment_template, target_url)
+                
+                # Clean up: close the facebook.com tab and return to Business Suite tab
+                try:
+                    current_handles = self.driver.window_handles
+                    current_handle = self.driver.current_window_handle
+                    print(f"[Automator] Cleanup: handles={current_handles}, current={current_handle}, original={original_window}")
+                    if len(current_handles) > 1 and current_handle != original_window and original_window in current_handles:
+                        try:
+                            self.driver.close()  # Close the facebook.com tab
+                            print("[Automator] Closed facebook.com tab.")
+                        except Exception as close_err:
+                            print(f"[Automator] Tab close error (non-fatal): {close_err}")
+                        try:
+                            self.driver.switch_to.window(original_window)
+                            print("[Automator] Switched back to Business Suite tab.")
+                        except Exception as sw_err:
+                            print(f"[Automator] Switch-back error: {sw_err}")
+                            # Recover: switch to first available handle
+                            try:
+                                remaining = self.driver.window_handles
+                                if remaining:
+                                    self.driver.switch_to.window(remaining[0])
+                                    print(f"[Automator] Recovered: switched to first available handle {remaining[0]}")
+                            except Exception as rec_err:
+                                print(f"[Automator] Recovery failed: {rec_err}")
+                    elif original_window not in current_handles:
+                        print(f"[Automator] WARNING: original_window {original_window} no longer exists. Switching to first available.")
+                        try:
+                            remaining = self.driver.window_handles
+                            if remaining:
+                                self.driver.switch_to.window(remaining[0])
+                        except: pass
+                except Exception as cleanup_err:
+                    print(f"[Automator] Cleanup outer error: {cleanup_err}")
+                
+                if success:
+                    return True
+                print("[Automator] facebook.com commenting failed. Falling back to details panel commenting...")
+            else:
+                print("[Automator] 'View reel on Facebook' link/button not found. Falling back to details panel commenting...")
+
         spun_comment = self._spin_text(comment_template)
         # Filter emojis for selenium
         spun_comment = "".join(c for c in spun_comment if ord(c) <= 0xFFFF)
@@ -1791,6 +2588,7 @@ class FacebookAutomator:
                 return False
         except Exception as e:
             print(f"[Automator] Error posting comment: {e}")
+            if self._is_browser_disconnected(e): raise e
             return False
     def _close_popups_v2(self):
         """
@@ -1798,6 +2596,24 @@ class FacebookAutomator:
         """
         # self.log("Checking for popups/overlays...") # Too noisy if called often
         self.driver.implicitly_wait(0)
+        
+        def is_part_of_details_panel(el):
+            try:
+                curr = el
+                for _ in range(8):
+                    if curr is None:
+                        break
+                    role = curr.get_attribute("role")
+                    tag = curr.tag_name.lower()
+                    if role in ("dialog", "presentation") or tag == "dialog":
+                        # If this container contains a comment box or a link to a reel/video/post, it's the details panel
+                        if curr.find_elements(By.XPATH, ".//div[@role='textbox'] | .//a[contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]"):
+                            return True
+                    curr = curr.find_element(By.XPATH, "./..")
+            except:
+                pass
+            return False
+
         try:
             # 0. Intercept "Get started" screen
             go_home_selectors = [
@@ -1841,6 +2657,8 @@ class FacebookAutomator:
                         els = self.driver.find_elements(By.XPATH, q)
                         for el in els:
                             if el.is_displayed():
+                                if is_part_of_details_panel(el):
+                                    continue
                                 self.log(f"ℹ️ Found floating close button: {q}")
                                 self.driver.execute_script("arguments[0].click();", el)
                                 time.sleep(1)
@@ -1870,6 +2688,8 @@ class FacebookAutomator:
                         elements = self.driver.find_elements(By.XPATH, sel)
                         for el in elements:
                             if el.is_displayed():
+                                if is_part_of_details_panel(el):
+                                    continue
                                 self.log(f"ℹ️ Closing detected popup: {sel}")
                                 self.driver.execute_script("arguments[0].click();", el)
                                 time.sleep(1.5)
@@ -1903,10 +2723,12 @@ class FacebookAutomator:
             self.driver.get(url)
         except Exception as e:
             print(f"[Automator] [Navigation Error] {e}. Trying JS fallback...")
+            if self._is_browser_disconnected(e): raise e
             try:
                 self.driver.execute_script(f"window.location.href = '{url}';")
-            except:
+            except Exception as js_e:
                 print("[Automator] [Severe] Navigation failed even via JS.")
+                if self._is_browser_disconnected(js_e): raise js_e
 
     def close(self):
         self.driver.quit()

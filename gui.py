@@ -870,7 +870,8 @@ class App(tk.Tk):
                                 self.after(0, lambda: messagebox.showerror("Thất bại", f"Không thể kết nối API {btype}."))
                                 self.log(f"Kết nối {btype} thất bại.")
                         except Exception as e:
-                            self.after(0, lambda: messagebox.showerror("Lỗi", f"Lỗi kết nối: {e}"))
+                            err_msg = f"Lỗi kết nối: {e}"
+                            self.after(0, lambda: messagebox.showerror("Lỗi", err_msg))
                     threading.Thread(target=run, daemon=True).start()
                 return _test
                 

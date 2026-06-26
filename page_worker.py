@@ -167,6 +167,10 @@ def run_worker(job_path):
         log(f"[Worker:{profile_label}] LỖI: Không thể mở profile {p_id}. Thoát.")
         return
 
+    # Thêm thời gian chờ để trình duyệt ổn định hẳn trước khi kết nối Selenium
+    log(f"[Worker:{profile_label}] Đợi 5 giây để trình duyệt ổn định...")
+    time.sleep(5)
+
     try:
         data_content = launch_data.get('data', {}) if isinstance(launch_data.get('data'), dict) else {}
         debugger_address = data_content.get('remote_debugging_address') or data_content.get('debugger_address')
@@ -242,6 +246,9 @@ def run_worker(job_path):
                             launch_data = api.start_profile(p_id)
 
                         if launch_data and launch_data.get('success'):
+                            # Thêm thời gian chờ để trình duyệt ổn định hẳn trước khi tái kết nối Selenium
+                            log(f"[Worker:{profile_label}] Đợi 5 giây để trình duyệt ổn định...")
+                            time.sleep(5)
                             data_content = launch_data.get('data', {}) if isinstance(launch_data.get('data'), dict) else {}
                             debugger_address = data_content.get('remote_debugging_address') or data_content.get('debugger_address')
                             driver_path = data_content.get('driver_path')
@@ -351,7 +358,8 @@ def run_worker(job_path):
 
                         if run_mode == 'post_and_comment' and uploaded_videos:
                             for folder, vf in uploaded_videos:
-                                time.sleep(10)
+                                log(f"[Worker:{profile_label}] [{page_name}] Đợi 45 giây để Facebook xử lý video trước khi bình luận...")
+                                time.sleep(45)
                                 title = os.path.splitext(vf)[0]
                                 # Determine comment text: Shopee URL or template
                                 if shopee_mode and vf in shopee_assignment:
@@ -362,7 +370,7 @@ def run_worker(job_path):
                                     comment_text = db.get_effective_comment_template(page['link'])
                                 
                                 if comment_text.strip():
-                                    ok, link = automator.comment_with_dual_strategy(asset_id, title, comment_text)
+                                    ok, link = automator.comment_with_dual_strategy(asset_id, title, comment_text, page_name=page_name)
                                     if ok:
                                         db.add_comment_history(page['link'], vf, link or '')
                                         log(f"[Worker:{profile_label}] [{page_name}] Comment thành công: {vf}")
@@ -379,7 +387,7 @@ def run_worker(job_path):
                         if comment_template.strip():
                             for v_name in local_comment_historic:
                                 title = os.path.splitext(v_name)[0]
-                                ok, link = automator.comment_with_dual_strategy(asset_id, title, comment_template)
+                                ok, link = automator.comment_with_dual_strategy(asset_id, title, comment_template, page_name=page_name)
                                 if ok:
                                     db.add_comment_history(page['link'], v_name, link or '')
                                     log(f"[Worker:{profile_label}] [{page_name}] Comment lịch sử thành công: {v_name}")
