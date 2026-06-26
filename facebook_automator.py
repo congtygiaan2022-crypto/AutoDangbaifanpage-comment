@@ -2095,7 +2095,22 @@ class FacebookAutomator:
                         time.sleep(4)
                         self._close_popups_v2()
                     except Exception as nav_err:
-                        print(f"[Automator] Navigate back error: {nav_err}")
+                        err_nav = str(nav_err).lower()
+                        if "invalid session" in err_nav or "session deleted" in err_nav:
+                            print(f"[Automator] Session dropped during navigate-back (no switcher). Reconnecting...")
+                            if self._reconnect_driver(wait_seconds=12):
+                                try:
+                                    self._safe_get(post_link)
+                                    time.sleep(4)
+                                    self._close_popups_v2()
+                                except Exception as retry_err:
+                                    print(f"[Automator] Navigate-back retry error after reconnect: {retry_err}")
+                            else:
+                                print("[Automator] Reconnect failed after navigate-back session loss. Aborting.")
+                                return False
+                        else:
+                            print(f"[Automator] Navigate back error: {nav_err}")
+
 
 
             # Cuộn trang để khu vực comment hiện ra (quan trọng với reel page)
@@ -2681,25 +2696,30 @@ class FacebookAutomator:
             ]
                 
             closed_any = False
-            for _ in range(3):
+            # Loop up to 8 rounds: each round closes all visible popups, then re-checks
+            for round_num in range(8):
                 found_in_round = False
                 for sel in popup_selectors:
                     try:
                         elements = self.driver.find_elements(By.XPATH, sel)
                         for el in elements:
-                            if el.is_displayed():
-                                if is_part_of_details_panel(el):
-                                    continue
-                                self.log(f"ℹ️ Closing detected popup: {sel}")
-                                self.driver.execute_script("arguments[0].click();", el)
-                                time.sleep(1.5)
-                                found_in_round = True
-                                closed_any = True
-                                break 
-                        if found_in_round: break
+                            try:
+                                if el.is_displayed():
+                                    if is_part_of_details_panel(el):
+                                        continue
+                                    self.log(f"ℹ️ Closing detected popup (round {round_num+1}): {sel}")
+                                    self.driver.execute_script("arguments[0].click();", el)
+                                    time.sleep(1.2)
+                                    found_in_round = True
+                                    closed_any = True
+                                    # Don't break — keep scanning to close ALL visible popups in this round
+                            except: continue
                     except: continue
+                # If nothing was closed in this round, we're done
                 if not found_in_round:
                     break
+                # Brief wait before next round to let new popups settle
+                time.sleep(0.5)
                 
             return closed_any
         except:
