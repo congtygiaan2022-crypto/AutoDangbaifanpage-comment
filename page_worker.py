@@ -357,42 +357,87 @@ def run_worker(job_path):
                                         log(f"[Worker:{profile_label}] [{page_name}] Lỗi xóa video: {del_e}")
 
                         if run_mode == 'post_and_comment' and uploaded_videos:
+                            log(f"[Worker:{profile_label}] [{page_name}] Đợi 25 giây để Facebook xử lý các video đã đăng...")
+                            time.sleep(25)
+
+                            titles_and_comments = []
+                            video_to_title_map = {}
+
                             for folder, vf in uploaded_videos:
-                                log(f"[Worker:{profile_label}] [{page_name}] Đợi 45 giây để Facebook xử lý video trước khi bình luận...")
-                                time.sleep(45)
                                 title = os.path.splitext(vf)[0]
-                                # Determine comment text: Shopee URL or template
+                                # Shopee mode: append product name to title
+                                posted_title = title
                                 if shopee_mode and vf in shopee_assignment:
                                     prod = shopee_assignment[vf]
+                                    posted_title = title + " - " + prod['name']
                                     comment_text = prod['url']
-                                    log(f"[Worker:{profile_label}] [{page_name}] [Shopee] Comment link sản phẩm #{prod['stt']}: {comment_text}")
+                                    log(f"[Worker:{profile_label}] [{page_name}] [Shopee] Chuẩn bị comment link sản phẩm #{prod['stt']} cho video: {vf}")
                                 else:
                                     comment_text = db.get_effective_comment_template(page['link'])
                                 
                                 if comment_text.strip():
-                                    ok, link = automator.comment_with_dual_strategy(asset_id, title, comment_text, page_name=page_name)
-                                    if ok:
-                                        db.add_comment_history(page['link'], vf, link or '')
-                                        log(f"[Worker:{profile_label}] [{page_name}] Comment thành công: {vf}")
+                                    titles_and_comments.append((posted_title, comment_text))
+                                    video_to_title_map[posted_title] = vf
                                 else:
-                                    log(f"[Worker:{profile_label}] [{page_name}] Mẫu bình luận rỗng. Bỏ qua comment bài viết mới.")
+                                    log(f"[Worker:{profile_label}] [{page_name}] Mẫu bình luận rỗng cho video: {vf}. Bỏ qua.")
 
-                    # Handle historical comments (comment_only mode)
-                    if local_comment_historic and run_mode == 'comment_only':
-                        log(f"[Worker:{profile_label}] [{page_name}] Comment {len(local_comment_historic)} bài cũ.")
-                        asset_id = automator.resolve_asset_id(page['link'])
-                        if not asset_id:
-                            raise Exception("Không resolve được asset_id.")
-                        comment_template = db.get_effective_comment_template(page['link'])
-                        if comment_template.strip():
-                            for v_name in local_comment_historic:
-                                title = os.path.splitext(v_name)[0]
-                                ok, link = automator.comment_with_dual_strategy(asset_id, title, comment_template, page_name=page_name)
-                                if ok:
-                                    db.add_comment_history(page['link'], v_name, link or '')
-                                    log(f"[Worker:{profile_label}] [{page_name}] Comment lịch sử thành công: {v_name}")
-                        else:
-                            log(f"[Worker:{profile_label}] [{page_name}] Mẫu bình luận rỗng. Bỏ qua comment bài viết cũ.")
+                            if titles_and_comments:
+                                log(f"[Worker:{profile_label}] [{page_name}] Bắt đầu bình luận hàng loạt cho {len(titles_and_comments)} bài đăng...")
+                                bulk_results = automator.comment_bulk_via_direct_links(asset_id, titles_and_comments, page_name=page_name)
+                                
+                                for posted_title, (ok, link) in bulk_results.items():
+                                    vf = video_to_title_map.get(posted_title)
+                                    if vf:
+                                        if shopee_mode and vf in shopee_assignment:
+                                            comment_text = shopee_assignment[vf]['url']
+                                        else:
+                                            comment_text = db.get_effective_comment_template(page['link'])
+                                        if ok:
+                                            db.add_comment_history(page['link'], vf, link or '')
+                                            log(f"[Worker:{profile_label}] [{page_name}] Comment thành công cho video: {vf} (link: {link})")
+                                        else:
+                                            log(f"[Worker:{profile_label}] [{page_name}] ⚠️ Bulk comment failed. Trying fallback custom strategies for: {vf}...")
+                                            fallback_ok, fallback_link = automator.comment_with_dual_strategy(asset_id, posted_title, comment_text, page_name=page_name)
+                                            if fallback_ok:
+                                                db.add_comment_history(page['link'], vf, fallback_link or '')
+                                                log(f"[Worker:{profile_label}] [{page_name}] ✓ Fallback comment succeeded for: {vf} (link: {fallback_link})")
+                                            else:
+                                                log(f"[Worker:{profile_label}] [{page_name}] ✗ Fallback comment also failed for: {vf}")
+
+                        # Handle historical comments (comment_only mode)
+                        if local_comment_historic and run_mode == 'comment_only':
+                            log(f"[Worker:{profile_label}] [{page_name}] Comment {len(local_comment_historic)} bài cũ.")
+                            asset_id = automator.resolve_asset_id(page['link'])
+                            if not asset_id:
+                                raise Exception("Không resolve được asset_id.")
+                            comment_template = db.get_effective_comment_template(page['link'])
+                            if comment_template.strip():
+                                titles_and_comments = []
+                                video_to_title_map = {}
+                                for v_name in local_comment_historic:
+                                    title = os.path.splitext(v_name)[0]
+                                    titles_and_comments.append((title, comment_template))
+                                    video_to_title_map[title] = v_name
+                                    
+                                log(f"[Worker:{profile_label}] [{page_name}] Bắt đầu bình luận hàng loạt cho {len(titles_and_comments)} bài cũ...")
+                                bulk_results = automator.comment_bulk_via_direct_links(asset_id, titles_and_comments, page_name=page_name)
+                                
+                                for title, (ok, link) in bulk_results.items():
+                                    v_name = video_to_title_map.get(title)
+                                    if v_name:
+                                        if ok:
+                                            db.add_comment_history(page['link'], v_name, link or '')
+                                            log(f"[Worker:{profile_label}] [{page_name}] Comment lịch sử thành công: {v_name} (link: {link})")
+                                        else:
+                                            log(f"[Worker:{profile_label}] [{page_name}] ⚠️ Bulk comment failed. Trying fallback custom strategies for historical: {v_name}...")
+                                            fallback_ok, fallback_link = automator.comment_with_dual_strategy(asset_id, title, comment_template, page_name=page_name)
+                                            if fallback_ok:
+                                                db.add_comment_history(page['link'], v_name, fallback_link or '')
+                                                log(f"[Worker:{profile_label}] [{page_name}] ✓ Fallback comment succeeded for historical: {v_name} (link: {fallback_link})")
+                                            else:
+                                                log(f"[Worker:{profile_label}] [{page_name}] ✗ Fallback comment also failed for historical: {v_name}")
+                            else:
+                                log(f"[Worker:{profile_label}] [{page_name}] Mẫu bình luận rỗng. Bỏ qua comment bài viết cũ.")
 
                     page_success = True
 

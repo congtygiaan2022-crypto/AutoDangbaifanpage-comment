@@ -987,11 +987,55 @@ class FacebookAutomator:
 
     def _get_clean_title(self, title_text):
         import re
-        clean = re.sub(r'#\w+', '', title_text)
+        # Remove video extensions case-insensitive
+        clean = re.sub(r'\.(mp4|mov|avi|mkv|webm|flv|3gp|wmv)$', '', title_text.strip(), flags=re.IGNORECASE)
+        # Remove hashtags
+        clean = re.sub(r'#\w+', '', clean)
+        # Remove characters outside BMP
         clean = "".join(c for c in clean if ord(c) <= 0xFFFF)
+        # Replace full-width characters with standard counterparts
+        clean = clean.replace('：', ':').replace('，', ',').replace('。', '.')
+        # Normalize whitespace
         clean = re.sub(r'\s+', ' ', clean).strip()
+        # Remove quotes
         clean = clean.replace("'", "").replace('"', "")
         return clean
+
+    def _acquire_clipboard_lock(self, timeout=20):
+        import tempfile
+        self._clip_lock_file = os.path.join(tempfile.gettempdir(), "fb_automator_clipboard.lock")
+        start_time = time.time()
+        while True:
+            try:
+                self._clip_lock_fd = os.open(self._clip_lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                return True
+            except FileExistsError:
+                try:
+                    if os.path.exists(self._clip_lock_file):
+                        mtime = os.path.getmtime(self._clip_lock_file)
+                        if time.time() - mtime > 20:
+                            try:
+                                os.remove(self._clip_lock_file)
+                            except: pass
+                except: pass
+                if time.time() - start_time > timeout:
+                    print("[Automator] Clipboard lock acquisition timeout.")
+                    return False
+                time.sleep(0.3)
+            except Exception as e:
+                print(f"[Automator] Lock error: {e}")
+                return False
+
+    def _release_clipboard_lock(self):
+        try:
+            if hasattr(self, '_clip_lock_fd') and self._clip_lock_fd is not None:
+                os.close(self._clip_lock_fd)
+                self._clip_lock_fd = None
+        except: pass
+        try:
+            if hasattr(self, '_clip_lock_file') and os.path.exists(self._clip_lock_file):
+                os.remove(self._clip_lock_file)
+        except: pass
 
     def _robust_js_scroll(self):
         """
@@ -1872,18 +1916,30 @@ class FacebookAutomator:
         except:
             return False
 
-    def comment_on_facebook_com(self, page_name, comment_template, post_link):
+    def switch_profile_to_page(self, page_name):
         """
-        Navigates to facebook.com post page, switches profile to the correct page name,
-        and posts the comment.
+        Navigates to facebook.com, checks if active profile is page_name.
+        If not, opens profile switcher and switches profile to page_name.
+        Handles session loss reconnect.
         """
         try:
-            print(f"[Automator] Navigating to Facebook post page: {post_link}")
-            self._safe_get(post_link)
+            try:
+                self._safe_get("https://www.facebook.com")
+            except Exception as get_err:
+                err_str = str(get_err).lower()
+                if "invalid session" in err_str or "session deleted" in err_str:
+                    print(f"[Automator] Session dropped during initial get in switch_profile. Reconnecting...")
+                    if self._reconnect_driver(wait_seconds=12):
+                        self._safe_get("https://www.facebook.com")
+                    else:
+                        raise get_err
+                else:
+                    raise get_err
             time.sleep(5)
             self._close_popups_v2()
+            self.driver.implicitly_wait(0)
 
-            # Check if we are already acting as the target page to avoid redundant switching
+            # Check if we are already acting as the target page
             already_active = False
             profile_selectors = [
                 "//div[@role='banner']//div[@aria-label='Your profile' or @aria-label='Trang cá nhân của bạn' or contains(@aria-label, 'profile') or contains(@aria-label, 'cá nhân')][@role='button']",
@@ -1904,214 +1960,773 @@ class FacebookAutomator:
                 except: pass
                 if already_active: break
 
-            profile_btn = None
             if already_active:
-                print(f"[Automator] Already acting as '{page_name}' (detected via profile button aria-label). Skipping switch.")
-            else:
-                print(f"[Automator] [BƯỚC 2] Bấm icon trên cùng bên phải để mở menu tài khoản switcher...")
-                # Click the top-right profile button
-                for sel in profile_selectors:
-                    try:
-                        elements = self.driver.find_elements(By.XPATH, sel)
-                        for el in elements:
-                            if el.is_displayed():
-                                profile_btn = el
-                                break
-                    except: pass
-                    if profile_btn: break
+                print(f"[Automator] Already acting as '{page_name}'. Skipping switch.")
+                return True
 
-                if profile_btn:
+            profile_btn = None
+            print(f"[Automator] [BƯỚC 2] Bấm icon trên cùng bên phải để mở menu tài khoản switcher...")
+            # Click the top-right profile button
+            for sel in profile_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, sel)
+                    for el in elements:
+                        if el.is_displayed():
+                            profile_btn = el
+                            break
+                except: pass
+                if profile_btn: break
+
+            if profile_btn:
+                # Event-driven click validation loop for profile button
+                menu_opened = False
+                for attempt in range(3):
                     try:
                         profile_btn.click()
                     except:
-                        self.driver.execute_script("arguments[0].click();", profile_btn)
-                    time.sleep(3)
-                else:
-                    print("[Automator] Warning: Profile switcher button at top right not found. Attempting comment directly...")
-                    # We will still proceed to comment directly
+                        try:
+                            self.driver.execute_script("arguments[0].click();", profile_btn)
+                        except: pass
+                    time.sleep(1.5)
+                    # Verify menu opened
+                    menu_els = self.driver.find_elements(By.XPATH, "//div[@role='menu'] | //*[contains(text(), 'See all profiles') or contains(text(), 'Xem tất cả')]")
+                    if any(m.is_displayed() for m in menu_els):
+                        menu_opened = True
+                        break
+                    print(f"[Automator] Profile switcher menu did not open, retrying click (Attempt {attempt+1}/3)...")
+                
+                if not menu_opened:
+                    print("[Automator] Warning: Profile switcher menu did not open after retries.")
+                    return False
+            else:
+                print("[Automator] Warning: Profile switcher button at top right not found.")
+                return False
                 
             # If the profile switcher menu opened, look for target page_name
-            if profile_btn and not already_active:
-                target_profile = None
-                # First check if the page name is visible directly in the first menu screen
-                direct_selectors = [
-                    f"//div[@role='menu']//span[text()='{page_name}']",
-                    f"//div[@role='menu']//*[text()='{page_name}']",
-                    f"//div[@role='menu']//span[contains(text(), '{page_name}')]",
-                    f"//div[@role='menu']//*[contains(text(), '{page_name}')]"
+            target_profile = None
+            # First check if the page name is visible directly in the first menu screen
+            direct_selectors = [
+                f"//div[@role='menu']//span[text()='{page_name}']",
+                f"//div[@role='menu']//*[text()='{page_name}']",
+                f"//div[@role='menu']//span[contains(text(), '{page_name}')]",
+                f"//div[@role='menu']//*[contains(text(), '{page_name}')]"
+            ]
+            for sel in direct_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, sel)
+                    for el in elements:
+                        if el.is_displayed():
+                            # Try to get ancestor button/link
+                            try:
+                                parent = el.find_element(By.XPATH, "./ancestor::div[@role='button' or @role='link' or @role='listitem' or @role='menuitem']")
+                                target_profile = parent
+                            except:
+                                target_profile = el
+                            break
+                except: pass
+                if target_profile: break
+
+            # If not found directly, look for "See all profiles" to open switcher list
+            if not target_profile:
+                see_all_btn = None
+                see_all_selectors = [
+                    "//div[@role='menu']//*[contains(text(), 'See all profiles') or contains(text(), 'Xem tất cả trang cá nhân') or contains(text(), 'Xem tất cả profile')]",
+                    "//div[@role='menu']//*[contains(text(), 'Xem tất cả') or contains(text(), 'See all')]",
+                    "//*[contains(text(), 'See all profiles') or contains(text(), 'Xem tất cả trang cá nhân')]"
                 ]
-                for sel in direct_selectors:
+                for sel in see_all_selectors:
                     try:
                         elements = self.driver.find_elements(By.XPATH, sel)
                         for el in elements:
                             if el.is_displayed():
-                                # Try to get ancestor button/link
-                                try:
-                                    parent = el.find_element(By.XPATH, "./ancestor::div[@role='button' or @role='link' or @role='listitem' or @role='menuitem']")
-                                    target_profile = parent
-                                except:
-                                    target_profile = el
+                                see_all_btn = el
                                 break
                     except: pass
-                    if target_profile: break
+                    if see_all_btn: break
 
-                # If not found directly, look for "See all profiles" to open switcher list
-                if not target_profile:
-                    see_all_btn = None
-                    see_all_selectors = [
-                        "//div[@role='menu']//*[contains(text(), 'See all profiles') or contains(text(), 'Xem tất cả trang cá nhân') or contains(text(), 'Xem tất cả profile')]",
-                        "//div[@role='menu']//*[contains(text(), 'Xem tất cả') or contains(text(), 'See all')]",
-                        "//*[contains(text(), 'See all profiles') or contains(text(), 'Xem tất cả trang cá nhân')]"
+                if see_all_btn:
+                    print("[Automator] Clicking 'See all profiles'...")
+                    switcher_list_opened = False
+                    for attempt in range(3):
+                        try:
+                            see_all_btn.click()
+                        except:
+                            try:
+                                self.driver.execute_script("arguments[0].click();", see_all_btn)
+                            except: pass
+                        time.sleep(1.5)
+                        
+                        # Verify switcher list opened (look for search input or profile names)
+                        search_input_selectors = [
+                            "//input[@placeholder='Search profiles and Pages']",
+                            "//input[@aria-label='Search profiles and Pages']",
+                            "//input[contains(@placeholder, 'Search profiles')]",
+                            "//input[contains(@aria-label, 'Search profiles')]",
+                            "//input[contains(@placeholder, 'Tìm kiếm')]"
+                        ]
+                        found_input = False
+                        for s_sel in search_input_selectors:
+                            if self.driver.find_elements(By.XPATH, s_sel):
+                                found_input = True
+                                break
+                        if found_input or self.driver.find_elements(By.XPATH, f"//span[text()='{page_name}'] | //*[text()='{page_name}']"):
+                            switcher_list_opened = True
+                            break
+                        print(f"[Automator] Switcher profile list did not open, retrying see_all click (Attempt {attempt+1}/3)...")
+                    
+                    if not switcher_list_opened:
+                        print("[Automator] Warning: Switcher profile list did not open.")
+                        return False
+
+                    # Locate search input again for filtering
+                    search_input = None
+                    for s_sel in search_input_selectors:
+                        try:
+                            elems = self.driver.find_elements(By.XPATH, s_sel)
+                            for el in elems:
+                                if el.is_displayed():
+                                    search_input = el
+                                    break
+                        except: pass
+                        if search_input: break
+                            
+                    if search_input:
+                        print(f"[Automator] Found profile search input. Searching for '{page_name}'...")
+                        try:
+                            search_input.click()
+                        except:
+                            self.driver.execute_script("arguments[0].click();", search_input)
+                        time.sleep(0.3)
+                        search_input.send_keys(Keys.CONTROL + "a")
+                        search_input.send_keys(Keys.BACKSPACE)
+                        time.sleep(0.2)
+                        search_input.send_keys(page_name)
+                        
+                        # Wait for search results
+                        for attempt in range(3):
+                            time.sleep(1.0)
+                            if self.driver.find_elements(By.XPATH, f"//span[text()='{page_name}'] | //*[text()='{page_name}'] | //*[contains(text(), '{page_name}')]"):
+                                break
+
+                    # Now look in the full switcher list
+                    profile_list_selectors = [
+                        f"//span[text()='{page_name}']",
+                        f"//*[text()='{page_name}']",
+                        f"//span[contains(text(), '{page_name}')]",
+                        f"//*[contains(text(), '{page_name}')]"
                     ]
-                    for sel in see_all_selectors:
+                    for sel in profile_list_selectors:
                         try:
                             elements = self.driver.find_elements(By.XPATH, sel)
                             for el in elements:
                                 if el.is_displayed():
-                                    see_all_btn = el
+                                    try:
+                                        parent = el.find_element(By.XPATH, "./ancestor::div[@role='button' or @role='link' or @role='listitem' or @role='menuitem']")
+                                        target_profile = parent
+                                    except:
+                                        target_profile = el
                                     break
                         except: pass
-                        if see_all_btn: break
+                        if target_profile: break
 
-                    if see_all_btn:
-                        print("[Automator] Clicking 'See all profiles'...")
+            if target_profile:
+                print(f"[Automator] [BƯỚC 3] Tìm đúng tên fanpage '{page_name}' và bấm chuyển đổi...")
+                session_ok = True
+                try:
+                    target_profile.click()
+                except Exception as click_err:
+                    err_str = str(click_err).lower()
+                    if "invalid session" in err_str or "session deleted" in err_str:
+                        print(f"[Automator] Session dropped during profile click. Reconnecting...")
+                        session_ok = self._reconnect_driver(wait_seconds=15)
+                    else:
+                        print(f"[Automator] Native click failed: {click_err}. Trying JS click...")
                         try:
-                            see_all_btn.click()
-                        except:
-                            self.driver.execute_script("arguments[0].click();", see_all_btn)
-                        time.sleep(3)
+                            self.driver.execute_script("arguments[0].click();", target_profile)
+                        except Exception as js_err:
+                            err_str2 = str(js_err).lower()
+                            if "invalid session" in err_str2 or "session deleted" in err_str2:
+                                print(f"[Automator] Session dropped during JS profile click. Reconnecting...")
+                                session_ok = self._reconnect_driver(wait_seconds=15)
+                            else:
+                                print(f"[Automator] JS click also failed: {js_err}")
+                                session_ok = False
+                
+                if not session_ok:
+                    print("[Automator] Could not reconnect after profile switch.")
+                    return False
 
-                        # Search input handling to filter profiles
-                        try:
-                            search_input_selectors = [
-                                "//input[@placeholder='Search profiles and Pages']",
-                                "//input[@aria-label='Search profiles and Pages']",
-                                "//input[contains(@placeholder, 'Search profiles')]",
-                                "//input[contains(@aria-label, 'Search profiles')]",
-                                "//input[contains(@placeholder, 'Tìm kiếm')]"
-                            ]
-                            search_input = None
-                            for s_sel in search_input_selectors:
+                print("[Automator] [BƯỚC 4] Đợi 9 giây để trình duyệt reload sau khi chuyển profile...")
+                time.sleep(9) # Wait for switch reload
+
+                # After reload, session may be dead — try to reconnect
+                try:
+                    _ = self.driver.current_window_handle  # ping session
+                except Exception:
+                    print("[Automator] Session dropped after profile switch reload. Reconnecting...")
+                    if not self._reconnect_driver(wait_seconds=10):
+                        print("[Automator] ⚠️ Could not reconnect after reload.")
+                        return False
+                    print("[Automator] ✓ Reconnected after profile switch.")
+
+                return True
+            else:
+                print(f"[Automator] Target page '{page_name}' not found in switcher. Assuming already active.")
+                return True
+        except Exception as e:
+            print(f"[Automator] Error in switch_profile_to_page: {e}")
+            if self._is_browser_disconnected(e): raise e
+            return False
+        finally:
+            self.driver.implicitly_wait(10)
+
+    def get_reel_urls_bulk(self, asset_id, titles):
+        """
+        Gets reel URLs by clicking each post card on Published Posts page.
+        Business Suite lazy-loads all links via JS — they never appear in page_source.
+        For each post, we find it via its checkbox aria-label, click to open the
+        detail panel, then extract the URL using:
+        1. Click 'Copy link to reel' (or 'Sao chép liên kết') and read from clipboard.
+        2. If clipboard fails, click 'View reel on Facebook' (or 'Xem thước phim trên Facebook')
+           and capture the URL of the new tab.
+        Returns a dict {title: reel_url}.
+        """
+        resolved = {}
+        if not titles:
+            return resolved
+
+        import subprocess
+        from selenium.webdriver.common.keys import Keys
+        from selenium.webdriver.common.action_chains import ActionChains
+
+        def get_clipboard_text():
+            try:
+                res = subprocess.run(["powershell", "-NoProfile", "-Command", "Get-Clipboard"], capture_output=True, text=True, timeout=5)
+                text = res.stdout.strip()
+                if text and ("facebook.com" in text or "fb.com" in text):
+                    return text
+            except Exception as e:
+                print(f"[Automator] PowerShell clipboard error: {e}")
+            try:
+                import win32clipboard
+                win32clipboard.OpenClipboard()
+                data = win32clipboard.GetClipboardData()
+                win32clipboard.CloseClipboard()
+                if data and ("facebook.com" in data or "fb.com" in data):
+                    return data
+            except: pass
+            return None
+
+        def clear_clipboard():
+            try:
+                subprocess.run(["powershell", "-NoProfile", "-Command", "Set-Clipboard -Value $null"], capture_output=True)
+            except: pass
+
+        try:
+            biz_id = getattr(self, 'business_id', '1016985112612772')
+            curr_url = self.driver.current_url
+            if "published_posts" not in curr_url:
+                pub_url = f"https://business.facebook.com/latest/posts/published_posts/?business_id={biz_id}&asset_id={asset_id}"
+                print(f"[Automator] [GetReelURLBulk] Navigating to Published Posts: {pub_url}")
+                self._safe_get(pub_url)
+                time.sleep(8)
+                self._close_popups_v2()
+
+            for title in titles:
+                reel_url = None
+                # Clean the title to match what was actually uploaded to Facebook (removes hashtags, etc.)
+                clean_title = self._get_clean_title(title)
+                print(f"[Automator] [GetReelURLBulk] Resolving URL for: '{clean_title[:45]}...' (original: '{title[:35]}...')")
+
+                # Step 1: Find the post card via its checkbox aria-label
+                checkbox_el = None
+                for scroll_att in range(1, 5):
+                    self.driver.implicitly_wait(0)
+                    try:
+                        prefix_lens = [55, 40, 25]
+                        if len(clean_title) < 25:
+                            prefix_lens.append(len(clean_title))
+                        for prefix_len in prefix_lens:
+                            if prefix_len > len(clean_title) or prefix_len <= 0:
+                                continue
+                            prefix = clean_title[:prefix_len]
+                            try:
+                                sel = f'//input[@type="checkbox"][contains(@aria-label, "{prefix}")]'
+                                els = self.driver.find_elements(By.XPATH, sel)
+                                if els:
+                                    checkbox_el = els[0]
+                                    break
+                            except: pass
+                            if not checkbox_el:
                                 try:
-                                    elems = self.driver.find_elements(By.XPATH, s_sel)
+                                    sel2 = f"//input[@type='checkbox'][contains(@aria-label, '{prefix}')]"
+                                    els = self.driver.find_elements(By.XPATH, sel2)
+                                    if els:
+                                        checkbox_el = els[0]
+                                        break
+                                except: pass
+                            if checkbox_el: break
+                    finally:
+                        self.driver.implicitly_wait(2)
+
+                    if checkbox_el:
+                        break
+                    print(f"[Automator] [GetReelURLBulk] Scroll {scroll_att}/4 to find: {clean_title[:35]}...")
+                    self._robust_js_scroll()
+                    time.sleep(3)
+
+                if not checkbox_el:
+                    print(f"[Automator] [GetReelURLBulk] ✗ Post card not found for: {clean_title[:50]}")
+                    continue
+
+                # Step 2: Scroll card into view then click its title text or card row to open details panel
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", checkbox_el)
+                    time.sleep(1.5)
+
+                    card_clicked = False
+                    
+                    # Strategy 1: Find the title text element and click it natively (Highly reliable for React)
+                    try:
+                        title_prefix = clean_title[:35]
+                        title_xpath = f"//*[contains(text(), '{title_prefix}')]"
+                        title_els = self.driver.find_elements(By.XPATH, title_xpath)
+                        for t_el in title_els:
+                            if t_el.is_displayed() and t_el.tag_name.lower() not in ['script', 'style', 'input', 'textarea']:
+                                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", t_el)
+                                time.sleep(1.0)
+                                actions = ActionChains(self.driver)
+                                actions.move_to_element(t_el).click().perform()
+                                print(f"[Automator] [GetReelURLBulk] Clicked title text natively for: {clean_title[:30]}")
+                                card_clicked = True
+                                break
+                    except Exception as e:
+                        print(f"[Automator] [GetReelURLBulk] Strategy 1 (title click) failed: {e}")
+
+                    # Strategy 2: Click the card container natively
+                    if not card_clicked:
+                        try:
+                            card = checkbox_el.find_element(By.XPATH, "../../../..")
+                            actions = ActionChains(self.driver)
+                            actions.move_to_element(card).click().perform()
+                            print(f"[Automator] [GetReelURLBulk] Clicked card row natively for: {clean_title[:30]}")
+                            card_clicked = True
+                        except Exception as e:
+                            print(f"[Automator] [GetReelURLBulk] Strategy 2 (row click) failed: {e}")
+
+                    # Strategy 3: Click the thumbnail natively
+                    if not card_clicked:
+                        try:
+                            for levels in range(2, 9):
+                                ancestor_xpath = "/".join([".."] * levels)
+                                ancestor = checkbox_el.find_element(By.XPATH, ancestor_xpath)
+                                media_els = ancestor.find_elements(By.XPATH, ".//img | .//video")
+                                for m in media_els:
+                                    if m.is_displayed():
+                                        actions = ActionChains(self.driver)
+                                        actions.move_to_element(m).click().perform()
+                                        print(f"[Automator] [GetReelURLBulk] Clicked thumbnail natively for: {clean_title[:30]}")
+                                        card_clicked = True
+                                        break
+                                if card_clicked: break
+                        except Exception as e:
+                            print(f"[Automator] [GetReelURLBulk] Strategy 3 (thumbnail click) failed: {e}")
+
+                    # Strategy 4: Last resort JS click on thumbnail or container
+                    if not card_clicked:
+                        try:
+                            for levels in range(2, 9):
+                                ancestor_xpath = "/".join([".."] * levels)
+                                ancestor = checkbox_el.find_element(By.XPATH, ancestor_xpath)
+                                media_els = ancestor.find_elements(By.XPATH, ".//img | .//video")
+                                for m in media_els:
+                                    if m.is_displayed():
+                                        self.driver.execute_script("arguments[0].click();", m)
+                                        print(f"[Automator] [GetReelURLBulk] JS clicked thumbnail for: {clean_title[:30]}")
+                                        card_clicked = True
+                                        break
+                                if card_clicked: break
+                        except: pass
+
+                    if not card_clicked:
+                        print(f"[Automator] [GetReelURLBulk] ✗ Could not click card for: {clean_title[:40]}")
+                        continue
+
+                except Exception as click_err:
+                    print(f"[Automator] [GetReelURLBulk] Click error: {click_err}")
+                    continue
+
+                # Step 3: Wait for detail panel, then extract reel URL using Strategy 1 (Clipboard) or Strategy 2 (New Tab)
+                time.sleep(7.5)  # Increased wait time for full hydration of React panel elements
+
+                # Strategy 1: Copy link and check clipboard (Process-synchronized via atomic file lock)
+                lock_acquired = self._acquire_clipboard_lock()
+                if lock_acquired:
+                    try:
+                        clear_clipboard()
+                        copy_selectors = [
+                            "//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'copy') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'link')]",
+                            "//div[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'copy') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'link')]",
+                            "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'copy') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'link')]",
+                            "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'copy') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'link')]",
+                            "//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'sao chép') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'liên kết')]",
+                            "//div[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'sao chép') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'liên kết')]",
+                            "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'sao chép') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'liên kết')]",
+                            "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'sao chép') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'liên kết')]",
+                            "//span[translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='copy']",
+                            "//div[translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='copy']",
+                            "//span[translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='sao chép']",
+                            "//div[translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='sao chép']"
+                        ]
+                        copy_btn = None
+                        self.driver.implicitly_wait(0)
+                        try:
+                            for sel in copy_selectors:
+                                try:
+                                    elems = self.driver.find_elements(By.XPATH, sel)
                                     for el in elems:
                                         if el.is_displayed():
-                                            search_input = el
+                                            copy_btn = el
                                             break
                                 except: pass
-                                if search_input: break
-                                
-                            if search_input:
-                                print(f"[Automator] Found profile search input. Searching for '{page_name}'...")
-                                try:
-                                    search_input.click()
-                                except:
-                                    self.driver.execute_script("arguments[0].click();", search_input)
-                                time.sleep(0.5)
-                                from selenium.webdriver.common.keys import Keys
-                                search_input.send_keys(Keys.CONTROL + "a")
-                                search_input.send_keys(Keys.BACKSPACE)
-                                time.sleep(0.2)
-                                search_input.send_keys(page_name)
-                                time.sleep(2.5)
-                        except Exception as s_err:
-                            print(f"[Automator] Search input handling failed: {s_err}")
+                                if copy_btn: break
+                        finally:
+                            self.driver.implicitly_wait(2)
 
-                        # Now look in the full switcher list
-                        profile_list_selectors = [
-                            f"//span[text()='{page_name}']",
-                            f"//*[text()='{page_name}']",
-                            f"//span[contains(text(), '{page_name}')]",
-                            f"//*[contains(text(), '{page_name}')]"
-                        ]
-                        for sel in profile_list_selectors:
+                        if copy_btn:
                             try:
-                                elements = self.driver.find_elements(By.XPATH, sel)
-                                for el in elements:
+                                # Walk up to the parent button wrapper for a more reliable click
+                                try:
+                                    click_target = copy_btn.find_element(By.XPATH, "./parent::div | ./parent::a | ./parent::*")
+                                except:
+                                    click_target = copy_btn
+                                
+                                # Native click
+                                actions = ActionChains(self.driver)
+                                actions.move_to_element(click_target).click().perform()
+                                time.sleep(2.5)
+                                
+                                clip_text = get_clipboard_text()
+                                if clip_text:
+                                    reel_url = clip_text
+                                    print(f"[Automator] [GetReelURLBulk] ✓ Resolved via Clipboard: {reel_url}")
+                            except Exception as copy_err:
+                                print(f"[Automator] [GetReelURLBulk] Clipboard click/copy error: {copy_err}")
+                    finally:
+                        self._release_clipboard_lock()
+
+                # Strategy 2: Click View reel on Facebook and capture new tab (Enriched with direct link anchor matching)
+                if not reel_url:
+                    print("[Automator] [GetReelURLBulk] Clipboard strategy failed/skipped. Trying View button + New tab...")
+                    view_selectors = [
+                        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view')]",
+                        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem')]",
+                        "//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//div[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//div[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//a[contains(@href, 'facebook.com/') or contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]"
+                    ]
+                    view_btn = None
+                    self.driver.implicitly_wait(0)
+                    try:
+                        for sel in view_selectors:
+                            try:
+                                elems = self.driver.find_elements(By.XPATH, sel)
+                                for el in elems:
                                     if el.is_displayed():
-                                        try:
-                                            parent = el.find_element(By.XPATH, "./ancestor::div[@role='button' or @role='link' or @role='listitem' or @role='menuitem']")
-                                            target_profile = parent
-                                        except:
-                                            target_profile = el
+                                        view_btn = el
                                         break
                             except: pass
-                            if target_profile: break
+                            if view_btn: break
+                    finally:
+                        self.driver.implicitly_wait(2)
 
-                if target_profile:
-                    print(f"[Automator] [BƯỚC 3] Tìm đúng tên fanpage '{page_name}' và bấm chuyển đổi...")
-                    session_ok = True
-                    try:
-                        target_profile.click()
-                    except Exception as click_err:
-                        err_str = str(click_err).lower()
-                        if "invalid session" in err_str or "session deleted" in err_str:
-                            # Hard navigation killed the session — Chrome is still alive but
-                            # the WebDriver connection dropped. Reconnect and continue.
-                            print(f"[Automator] Session dropped during profile click (expected). Reconnecting...")
-                            session_ok = self._reconnect_driver(wait_seconds=15)
-                        else:
-                            print(f"[Automator] Native click failed: {click_err}. Trying JS click...")
+                    if view_btn:
+                        try:
+                            # Try to get href directly first
                             try:
-                                self.driver.execute_script("arguments[0].click();", target_profile)
-                            except Exception as js_err:
-                                err_str2 = str(js_err).lower()
-                                if "invalid session" in err_str2 or "session deleted" in err_str2:
-                                    print(f"[Automator] Session dropped during JS profile click. Reconnecting...")
-                                    session_ok = self._reconnect_driver(wait_seconds=15)
-                                else:
-                                    print(f"[Automator] JS click also failed: {js_err}")
-                                    session_ok = False
-                    
-                    if not session_ok:
-                        print("[Automator] Could not reconnect after profile switch. Aborting.")
-                        return False
+                                href = view_btn.get_attribute("href")
+                                if href and "facebook.com" in href:
+                                    reel_url = href
+                                    print(f"[Automator] [GetReelURLBulk] ✓ Resolved directly from href: {reel_url}")
+                            except: pass
 
-                    # After profile switch (or reconnect), navigate back to the target post
-                    print(f"[Automator] Profile switch completed. Navigating back to target post link: {post_link}")
-                    try:
-                        self._safe_get(post_link)
-                        time.sleep(5)
-                        self._close_popups_v2()
-                    except Exception as nav_err:
-                        err_str3 = str(nav_err).lower()
-                        if "invalid session" in err_str3 or "session deleted" in err_str3:
-                            print("[Automator] Session dropped during post-switch navigation. Reconnecting...")
-                            if self._reconnect_driver(wait_seconds=10):
-                                self._safe_get(post_link)
-                                time.sleep(5)
-                                self._close_popups_v2()
-                            else:
-                                return False
-                        else:
-                            print(f"[Automator] Navigation error after switch: {nav_err}")
-
-                else:
-                    print(f"[Automator] Target page '{page_name}' not found in switcher. Assuming already active. Navigating back to post...")
-                    # KHÔNG nhấn ESC vì sẽ đóng reel modal trên facebook.com
-                    # Thay vào đó navigate lại về post URL để đảm bảo ở đúng trang
-                    try:
-                        self._safe_get(post_link)
-                        time.sleep(4)
-                        self._close_popups_v2()
-                    except Exception as nav_err:
-                        err_nav = str(nav_err).lower()
-                        if "invalid session" in err_nav or "session deleted" in err_nav:
-                            print(f"[Automator] Session dropped during navigate-back (no switcher). Reconnecting...")
-                            if self._reconnect_driver(wait_seconds=12):
+                            if not reel_url:
                                 try:
-                                    self._safe_get(post_link)
-                                    time.sleep(4)
-                                    self._close_popups_v2()
-                                except Exception as retry_err:
-                                    print(f"[Automator] Navigate-back retry error after reconnect: {retry_err}")
-                            else:
-                                print("[Automator] Reconnect failed after navigate-back session loss. Aborting.")
-                                return False
-                        else:
-                            print(f"[Automator] Navigate back error: {nav_err}")
+                                    click_target = view_btn.find_element(By.XPATH, "./parent::div | ./parent::a | ./parent::*")
+                                except:
+                                    click_target = view_btn
+                                
+                                handles_before = self.driver.window_handles
+                                # Click natively
+                                actions = ActionChains(self.driver)
+                                actions.move_to_element(click_target).click().perform()
+                                time.sleep(4)
+                                handles_after = self.driver.window_handles
+                                
+                                new_handles = [h for h in handles_after if h not in handles_before]
+                                if new_handles:
+                                    orig_window = self.driver.current_window_handle
+                                    self.driver.switch_to.window(new_handles[0])
+                                    time.sleep(2)
+                                    reel_url = self.driver.current_url
+                                    print(f"[Automator] [GetReelURLBulk] ✓ Resolved via New Tab: {reel_url}")
+                                    self.driver.close()
+                                    self.driver.switch_to.window(orig_window)
+                        except Exception as view_err:
+                            print(f"[Automator] [GetReelURLBulk] View button capture error: {view_err}")
+
+                if reel_url:
+                    resolved[title] = reel_url
+                else:
+                    print(f"[Automator] [GetReelURLBulk] ✗ Panel opened but no URL found for: {title[:45]}")
+
+                # Step 4: Close the detail panel explicitly
+                try:
+                    close_btn = None
+                    close_selectors = [
+                        "//div[@role='button'][@aria-label='Close' or @aria-label='Đóng' or @aria-label='Cancel' or @aria-label='Hủy']",
+                        "//button[@aria-label='Close' or @aria-label='Đóng']",
+                        "//div[contains(@class,'close') or contains(@class,'Cancel')][@role='button']",
+                        "//i[contains(@class, 'close')]/ancestor::div[@role='button']"
+                    ]
+                    self.driver.implicitly_wait(0)
+                    for sel in close_selectors:
+                        try:
+                            els = self.driver.find_elements(By.XPATH, sel)
+                            for el in els:
+                                if el.is_displayed():
+                                    close_btn = el
+                                    break
+                        except: pass
+                        if close_btn: break
+                    self.driver.implicitly_wait(2)
+                    
+                    if close_btn:
+                        self.driver.execute_script("arguments[0].click();", close_btn)
+                        print("[Automator] [GetReelURLBulk] Closed details panel via Close button.")
+                    else:
+                        self.driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
+                        print("[Automator] [GetReelURLBulk] Closed details panel via ESCAPE.")
+                    time.sleep(2)
+                except: pass
+
+            unresolved = [t for t in titles if t not in resolved]
+            if unresolved:
+                print(f"[Automator] [GetReelURLBulk] ✗ Still unresolved: {[t[:40] for t in unresolved]}")
+
+        except Exception as e:
+            print(f"[Automator] [GetReelURLBulk] Error: {e}")
+
+        return resolved
 
 
+    def comment_bulk_via_direct_links(self, asset_id, titles_and_comments, page_name=None):
+        """
+        Optimized bulk comments flow:
+        1. Switch profile to page_name ONCE on facebook.com
+        2. Get all reel URLs in bulk from Business Suite Feed & Grid
+        3. Access each reel URL one-by-one and post the comment directly
+        """
+        results = {}
+        if not titles_and_comments:
+            return results
+
+        # 1. Switch profile to fanpage first
+        if page_name:
+            print(f"[Automator] [BulkDirect] STEP 1: Ensuring profile is switched to '{page_name}'...")
+            profile_ok = self.switch_profile_to_page(page_name)
+            if not profile_ok:
+                print("[Automator] [BulkDirect] Switch profile failed. Proceeding anyway.")
+
+        # 2. Get all titles and resolve URLs in bulk
+        titles = [item[0] for item in titles_and_comments]
+        print(f"[Automator] [BulkDirect] STEP 2: Fetching reel URLs from Feed & Grid for {len(titles)} titles...")
+        resolved_urls = self.get_reel_urls_bulk(asset_id, titles)
+
+        # 3. Access each URL and comment
+        # After profile switch, the session may have been reset — reconnect if needed
+        try:
+            original_window = self.driver.current_window_handle
+        except Exception as win_err:
+            err_str = str(win_err).lower()
+            if "connection" in err_str or "invalid session" in err_str or "session deleted" in err_str or "no such window" in err_str or "closed" in err_str:
+                print("[Automator] [BulkDirect] Session dropped or window closed before commenting. Reconnecting...")
+                if self._reconnect_driver(wait_seconds=10):
+                    print("[Automator] [BulkDirect] ✓ Reconnected. Continuing to comment.")
+                    original_window = self.driver.current_window_handle
+                else:
+                    print("[Automator] [BulkDirect] ✗ Could not reconnect. Aborting comment loop.")
+                    return results
+            else:
+                raise win_err
+        
+        for title, comment_template in titles_and_comments:
+            reel_url = resolved_urls.get(title)
+            if not reel_url:
+                print(f"[Automator] [BulkDirect] ✗ Could not resolve URL for title: {title[:50]}. Skipping.")
+                results[title] = (False, None)
+                continue
+
+            print(f"[Automator] [BulkDirect] STEP 3: Navigating to reel and commenting: {reel_url}")
+            success = False
+            try:
+                # Open a new tab
+                print(f"[Automator] [BulkDirect] Opening new tab for: {reel_url[:80]}")
+                self.driver.switch_to.new_window('tab')
+                time.sleep(1.0)
+                
+                # Navigate to the reel URL
+                self._safe_get(reel_url)
+                time.sleep(4)
+                self._close_popups_v2()
+
+                # Scroll to comment area
+                try:
+                    self.driver.execute_script("window.scrollBy(0, 300);")
+                    time.sleep(1.0)
+                except: pass
+
+                # Locate comment textbox
+                comment_box = None
+                comment_box_selectors = [
+                    "//div[@role='textbox'][contains(@aria-label, 'comment') or contains(@aria-label, 'bình luận') or contains(@aria-label, 'tư cách') or contains(@aria-label, 'dưới tên') or contains(@aria-label, 'Comment as')]",
+                    "//div[@aria-placeholder='Write a comment…' or @aria-placeholder='Viết bình luận…' or @aria-placeholder='Viết bình luận...' or @aria-placeholder='Write a comment...']",
+                    "//div[@role='textbox'][@contenteditable='true']",
+                    "//div[contains(@class, 'comment')]//div[@role='textbox']",
+                    "//form//div[@role='textbox']",
+                    "//div[@role='textbox']"
+                ]
+
+                # Wait for comment box
+                found, comment_box = self._wait_for_element(comment_box_selectors, timeout=8)
+
+                if not comment_box:
+                    print("[Automator] [BulkDirect] Comment box not immediately visible. Trying Comment button...")
+                    # Try comment button
+                    comment_btn_selectors = [
+                        "//div[@aria-label='Comment' or @aria-label='Bình luận'][@role='button']",
+                        "//*[@aria-label='Comment' or @aria-label='Bình luận'][@role='button']",
+                        "//div[@role='button'][contains(@aria-label, 'Comment') or contains(@aria-label, 'Bình luận')]",
+                        "//span[text()='Comment' or text()='Bình luận']/ancestor::div[@role='button']",
+                        "//div[@role='button'][contains(., 'Comment') or contains(., 'Bình luận')]",
+                        "//div[@role='button'][descendant::*[name()='svg']][position() <= 5]"
+                    ]
+                    comment_btn = None
+                    self.driver.implicitly_wait(0)
+                    try:
+                        for sel in comment_btn_selectors:
+                            elems = self.driver.find_elements(By.XPATH, sel)
+                            for el in elems:
+                                if el.is_displayed():
+                                    comment_btn = el
+                                    break
+                            if comment_btn: break
+                    finally:
+                        self.driver.implicitly_wait(10)
+
+                    if comment_btn:
+                        try:
+                            comment_btn.click()
+                            time.sleep(3)
+                        except:
+                            self.driver.execute_script("arguments[0].click();", comment_btn)
+                            time.sleep(3)
+
+                    # Recheck comment box
+                    found, comment_box = self._wait_for_element(comment_box_selectors, timeout=8)
+
+                if comment_box:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", comment_box)
+                    time.sleep(1.0)
+                    self.driver.execute_script("arguments[0].click();", comment_box)
+                    time.sleep(0.5)
+
+                    # Clear and write comment
+                    spun_comment = self._spin_text(comment_template)
+                    spun_comment = "".join(c for c in spun_comment if ord(c) <= 0xFFFF)
+                    
+                    from selenium.webdriver.common.keys import Keys
+                    try:
+                        comment_box.send_keys(Keys.CONTROL + "a")
+                        comment_box.send_keys(Keys.BACKSPACE)
+                        time.sleep(0.2)
+                    except: pass
+
+                    lines = spun_comment.split('\n')
+                    for i, line in enumerate(lines):
+                        comment_box.send_keys(line)
+                        if i < len(lines) - 1:
+                            comment_box.send_keys(Keys.SHIFT + Keys.ENTER)
+
+                    time.sleep(1.0)
+                    comment_box.send_keys(Keys.ENTER)
+
+                    # Submit button fallback
+                    post_btn_selectors = [
+                        "//div[@role='button'][@aria-label='Đăng' or @aria-label='Post' or @aria-label='Bình luận' or @aria-label='Send']",
+                        "//div[@role='button'][contains(., 'Đăng') or contains(., 'Post') or contains(., 'Bình luận')]"
+                    ]
+                    try:
+                        for sel in post_btn_selectors:
+                            btns = self.driver.find_elements(By.XPATH, sel)
+                            for b in btns:
+                                if b.is_displayed():
+                                    self.driver.execute_script("arguments[0].click();", b)
+                                    time.sleep(1)
+                                    break
+                    except: pass
+
+                    time.sleep(2)
+                    verified = self._verify_comment_posted()
+                    if verified:
+                        print("[Automator] [BulkDirect] ✓ Comment posted successfully (verified)!")
+                        success = True
+                    else:
+                        print("[Automator] [BulkDirect] ✗ Could not verify comment posting via 'Remove preview' text.")
+                        success = False
+                else:
+                    print("[Automator] [BulkDirect] ✗ Comment textbox not found.")
+
+            except Exception as e:
+                print(f"[Automator] [BulkDirect] Error commenting on {reel_url}: {e}")
+                if self._is_browser_disconnected(e):
+                    print("[Automator] [BulkDirect] Session dropped. Reconnecting...")
+                    self._reconnect_driver(wait_seconds=10)
+
+            # Close comment tab and return to Business Suite
+            try:
+                current_handles = self.driver.window_handles
+                if len(current_handles) > 1 and self.driver.current_window_handle != original_window:
+                    self.driver.close()
+                    self.driver.switch_to.window(original_window)
+            except Exception as cleanup_err:
+                print(f"[Automator] [BulkDirect] Cleanup error: {cleanup_err}")
+                try:
+                    if original_window in self.driver.window_handles:
+                        self.driver.switch_to.window(original_window)
+                except: pass
+
+            results[title] = (success, reel_url)
+
+        return results
+
+    def comment_on_facebook_com(self, page_name, comment_template, post_link):
+        """
+        Navigates to facebook.com post page, switches profile to the correct page name,
+        and posts the comment.
+        """
+        try:
+            if page_name:
+                self.switch_profile_to_page(page_name)
+
+            print(f"[Automator] Navigating to Facebook post page: {post_link}")
+            self._safe_get(post_link)
+            time.sleep(5)
+            self._close_popups_v2()
 
             # Cuộn trang để khu vực comment hiện ra (quan trọng với reel page)
             try:
@@ -2250,8 +2865,8 @@ class FacebookAutomator:
                 print("[Automator] Comment posted on facebook.com successfully (verified via Remove Preview)!")
                 return True
             else:
-                print("[Automator] Warning: Could not verify comment posting via 'Remove preview' text, but proceeding.")
-                return True
+                print("[Automator] ✗ Could not verify comment posting via 'Remove preview' text.")
+                return False
 
         except Exception as e:
             print(f"[Automator] Error commenting on facebook.com: {e}")
@@ -2415,6 +3030,8 @@ class FacebookAutomator:
                             elements = self.driver.find_elements(By.XPATH, sel)
                             for el in elements:
                                 try:
+                                    if not el.is_displayed():
+                                        continue
                                     href = el.get_attribute("href") or ""
                                     if not href:
                                         try:
@@ -2455,6 +3072,8 @@ class FacebookAutomator:
                     try:
                         links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]")
                         for l in links:
+                            if not l.is_displayed():
+                                continue
                             href = l.get_attribute("href") or ""
                             if href:
                                 mapped = href.replace("business.facebook.com", "www.facebook.com")
@@ -2621,8 +3240,8 @@ class FacebookAutomator:
                     role = curr.get_attribute("role")
                     tag = curr.tag_name.lower()
                     if role in ("dialog", "presentation") or tag == "dialog":
-                        # If this container contains a comment box or a link to a reel/video/post, it's the details panel
-                        if curr.find_elements(By.XPATH, ".//div[@role='textbox'] | .//a[contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]"):
+                        txt = (curr.text or "").lower()
+                        if any(x in txt for x in ["đã đăng", "published", "chi tiết", "details", "insights", "thống kê", "reel", "thước phim", "bài viết"]):
                             return True
                     curr = curr.find_element(By.XPATH, "./..")
             except:

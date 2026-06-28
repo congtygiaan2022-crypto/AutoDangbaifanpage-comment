@@ -2,7 +2,7 @@
     "profiles": [
         {
             "id": 1,
-            "name": "Xuân Thắng",
+            "name": "Hip",
             "db_file": "database.json",
             "sqlite_file": "system.db"
         },
