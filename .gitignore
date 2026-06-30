@@ -29,3 +29,7 @@ job_*.json
 # --- Thư mục chứa video tải về/đăng bài (nếu có) ---
 downloads/
 videos/
+
+# --- Đảm bảo thư mục backup và các tệp trong đó luôn được lưu trữ trên Git ---
+!backups/
+!backups/**

@@ -136,18 +136,39 @@ class App(tk.Tk):
         self.notebook.add(self.tab_settings, text="⚙️ Cấu Hình Hệ Thống")
         self._build_settings_tab()
 
-    # ─── TAB 1: DASHBOARD & LOGS ──────────────────────────────
     def _build_dashboard_tab(self):
+        # Local helper for card layout (GiaanTesttool style)
+        def make_card(parent, title, icon=""):
+            outer = tk.Frame(parent, bg="#23233a", highlightbackground="#2e2e48", highlightthickness=1)
+            outer.pack(fill="x", pady=(0, 10))
+            
+            # Separator top line
+            head = tk.Frame(outer, bg="#2e2e48", height=1)
+            head.pack(fill="x")
+            
+            # Title Bar
+            title_bar = tk.Frame(outer, bg="#23233a")
+            title_bar.pack(fill="x", padx=12, pady=(10, 6))
+            tk.Label(title_bar, text=f"{icon}  {title}" if icon else title,
+                     font=("Segoe UI", 10, "bold"), bg="#23233a", fg="#60a5fa").pack(side="left")
+                     
+            body = tk.Frame(outer, bg="#23233a")
+            body.pack(fill="x", padx=12, pady=(2, 12))
+            return body
+
+        # Set background of dashboard tab to deep dark
+        self.tab_dashboard.configure(bg="#12121a")
+
         # Outer grid
-        pane = tk.PanedWindow(self.tab_dashboard, orient=tk.HORIZONTAL, bg="#d9d9d9", sashwidth=5, sashrelief=tk.RAISED)
+        pane = tk.PanedWindow(self.tab_dashboard, orient=tk.HORIZONTAL, bg="#12121a", sashwidth=4, sashrelief=tk.FLAT)
         pane.pack(fill="both", expand=True)
         
         # Left control panel (Scrollable)
-        left_scroll = tk.Canvas(pane, bg=self.bg_color, highlightthickness=0)
+        left_scroll = tk.Canvas(pane, bg="#12121a", highlightthickness=0)
         left_scrollbar = ttk.Scrollbar(pane, orient="vertical", command=left_scroll.yview)
         left_scroll.configure(yscrollcommand=left_scrollbar.set)
         
-        left_col = tk.Frame(left_scroll, bg=self.bg_color, padx=10, pady=10)
+        left_col = tk.Frame(left_scroll, bg="#12121a", padx=10, pady=10)
         left_scroll.create_window((0, 0), window=left_col, anchor="nw")
         
         def on_left_configure(event):
@@ -161,32 +182,32 @@ class App(tk.Tk):
         left_scroll.bind("<Leave>", lambda e: left_scroll.unbind_all("<MouseWheel>"))
 
         # Right Log Frame
-        right_log_frame = tk.Frame(pane, bg="#f0f0f0")
+        right_log_frame = tk.Frame(pane, bg="#12121a", padx=10, pady=10)
         
         # Add panes
         pane.add(left_scroll, width=420)
         pane.add(right_log_frame, minsize=400)
         
         # 1. Status Display Box
-        self.status_frame = tk.Frame(left_col, bg=self.bg_color, pady=5)
+        self.status_frame = tk.Frame(left_col, bg="#23233a", highlightbackground="#2e2e48", highlightthickness=1)
         self.status_frame.pack(fill="x", pady=(0, 10))
-        self.status_lbl = tk.Label(self.status_frame, text="● HỆ THỐNG ĐANG DỪNG", font=("Segoe UI", 12, "bold"), fg="#c0392b", bg="#fadbd8", bd=1, relief="solid", pady=10)
+        self.status_lbl = tk.Label(self.status_frame, text="⬤ HỆ THỐNG ĐANG DỪNG", font=("Segoe UI", 11, "bold"), fg="#ef4444", bg="#2f1a1a", pady=12, bd=0)
         self.status_lbl.pack(fill="x")
         
         # 2. Execution Mode & Speed Group
-        exec_group = tk.LabelFrame(left_col, text=" ⚙️ Thiết Lập Chạy ", font=self.font_bold, bg="#ffffff", bd=1, relief="solid", padx=10, pady=10)
-        exec_group.pack(fill="x", pady=5)
+        exec_group = make_card(left_col, "Thiết Lập Chạy", "⚙️")
+        exec_group.columnconfigure(1, weight=1)
         
-        tk.Label(exec_group, text="Chế độ chạy:", bg="#ffffff", font=self.font_bold).grid(row=0, column=0, sticky="w", pady=4)
+        tk.Label(exec_group, text="Chế độ chạy:", bg="#23233a", fg="#9090b0", font=self.font_bold).grid(row=0, column=0, sticky="w", pady=6)
         self.run_mode_var = tk.StringVar()
         mode_map = {"post_and_comment": "Đăng + Comment", "post_only": "Chỉ Đăng", "comment_only": "Chỉ Comment"}
         self.run_mode_var.set(mode_map.get(self.db.get_run_mode(), "Đăng + Comment"))
         
         mode_combo = ttk.Combobox(exec_group, textvariable=self.run_mode_var, values=["Đăng + Comment", "Chỉ Đăng", "Chỉ Comment"], state="readonly", width=22)
-        mode_combo.grid(row=0, column=1, sticky="w", padx=10, pady=4)
+        mode_combo.grid(row=0, column=1, sticky="w", padx=10, pady=6)
         mode_combo.bind("<<ComboboxSelected>>", self._on_mode_change)
         
-        tk.Label(exec_group, text="Số luồng chạy song song:", bg="#ffffff", font=self.font_bold).grid(row=1, column=0, sticky="w", pady=4)
+        tk.Label(exec_group, text="Số luồng chạy song song:", bg="#23233a", fg="#9090b0", font=self.font_bold).grid(row=1, column=0, sticky="w", pady=6)
         
         # Syncing parallel workers count on change
         self.parallel_workers_var = tk.StringVar(value=str(self.db.get_max_parallel_workers()))
@@ -199,13 +220,13 @@ class App(tk.Tk):
             except:
                 pass
         
-        workers_spin = tk.Spinbox(exec_group, from_=1, to=20, textvariable=self.parallel_workers_var, width=10, bd=1, relief="solid")
-        workers_spin.grid(row=1, column=1, sticky="w", padx=10, pady=4)
+        workers_spin = tk.Spinbox(exec_group, from_=1, to=20, textvariable=self.parallel_workers_var, width=10, bd=1, relief="flat", bg="#1a1a2e", fg="#e8e8f0", insertbackground="white", buttonbackground="#2e2e48")
+        workers_spin.grid(row=1, column=1, sticky="w", padx=10, pady=6)
         workers_spin.bind("<FocusOut>", save_workers_count)
         workers_spin.bind("<Return>", save_workers_count)
         
         # Quick loop options
-        tk.Label(exec_group, text="Cách thức lặp:", bg="#ffffff", font=self.font_bold).grid(row=2, column=0, sticky="w", pady=4)
+        tk.Label(exec_group, text="Cách thức lặp:", bg="#23233a", fg="#9090b0", font=self.font_bold).grid(row=2, column=0, sticky="w", pady=6)
         config = self.db.get_scheduling_config()
         self.dashboard_loop_var = tk.StringVar(value=config['loop_mode'])
         
@@ -221,65 +242,64 @@ class App(tk.Tk):
             self.log(f"Đã cập nhật chế độ lặp: {self.dashboard_loop_var.get()}")
             self._update_scheduler_widgets_visibility()
             
-        loop_opts_frame = tk.Frame(exec_group, bg="#ffffff")
-        loop_opts_frame.grid(row=2, column=1, sticky="w", padx=10, pady=4)
-        tk.Radiobutton(loop_opts_frame, text="1 Lần", variable=self.dashboard_loop_var, value="once", bg="#ffffff", command=save_dash_loop).pack(side="left")
-        tk.Radiobutton(loop_opts_frame, text="Vô hạn", variable=self.dashboard_loop_var, value="infinite", bg="#ffffff", command=save_dash_loop).pack(side="left", padx=5)
-        tk.Radiobutton(loop_opts_frame, text="N Lần:", variable=self.dashboard_loop_var, value="count", bg="#ffffff", command=save_dash_loop).pack(side="left")
+        loop_opts_frame = tk.Frame(exec_group, bg="#23233a")
+        loop_opts_frame.grid(row=2, column=1, sticky="w", padx=10, pady=6)
+        tk.Radiobutton(loop_opts_frame, text="1 Lần", variable=self.dashboard_loop_var, value="once", bg="#23233a", fg="#e8e8f0", selectcolor="#1a1a2e", activebackground="#23233a", activeforeground="#e8e8f0", font=self.font_main, command=save_dash_loop).pack(side="left")
+        tk.Radiobutton(loop_opts_frame, text="Vô hạn", variable=self.dashboard_loop_var, value="infinite", bg="#23233a", fg="#e8e8f0", selectcolor="#1a1a2e", activebackground="#23233a", activeforeground="#e8e8f0", font=self.font_main, command=save_dash_loop).pack(side="left", padx=5)
+        tk.Radiobutton(loop_opts_frame, text="N Lần:", variable=self.dashboard_loop_var, value="count", bg="#23233a", fg="#e8e8f0", selectcolor="#1a1a2e", activebackground="#23233a", activeforeground="#e8e8f0", font=self.font_main, command=save_dash_loop).pack(side="left")
         
-        self.dashboard_loop_count_ent = tk.Entry(loop_opts_frame, width=5, bd=1, relief="solid")
+        self.dashboard_loop_count_ent = tk.Entry(loop_opts_frame, width=5, bd=1, relief="flat", bg="#1a1a2e", fg="#e8e8f0", insertbackground="white")
         self.dashboard_loop_count_ent.insert(0, str(config['loop_count']))
         self.dashboard_loop_count_ent.pack(side="left", padx=2)
         self.dashboard_loop_count_ent.bind("<FocusOut>", lambda e: save_dash_loop())
         
         # Rest and time window
-        self.dash_sched_frame = tk.Frame(exec_group, bg="#ffffff")
-        self.dash_sched_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5)
+        self.dash_sched_frame = tk.Frame(exec_group, bg="#23233a")
+        self.dash_sched_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=6)
+        self.dash_sched_frame.columnconfigure(1, weight=1)
         
-        tk.Label(self.dash_sched_frame, text="Nghỉ giữa lượt (phút):", bg="#ffffff", font=self.font_bold).grid(row=0, column=0, sticky="w", pady=2)
-        rest_inputs = tk.Frame(self.dash_sched_frame, bg="#ffffff")
-        rest_inputs.grid(row=0, column=1, sticky="w", padx=10, pady=2)
-        self.dashboard_rest_min_ent = tk.Entry(rest_inputs, width=5, bd=1, relief="solid")
+        tk.Label(self.dash_sched_frame, text="Nghỉ giữa lượt (phút):", bg="#23233a", fg="#9090b0", font=self.font_bold).grid(row=0, column=0, sticky="w", pady=4)
+        rest_inputs = tk.Frame(self.dash_sched_frame, bg="#23233a")
+        rest_inputs.grid(row=0, column=1, sticky="w", padx=10, pady=4)
+        self.dashboard_rest_min_ent = tk.Entry(rest_inputs, width=5, bd=1, relief="flat", bg="#1a1a2e", fg="#e8e8f0", insertbackground="white")
         self.dashboard_rest_min_ent.insert(0, str(config['rest_min']))
         self.dashboard_rest_min_ent.pack(side="left")
         self.dashboard_rest_min_ent.bind("<FocusOut>", lambda e: save_dash_loop())
         
-        tk.Label(rest_inputs, text="đến", bg="#ffffff").pack(side="left", padx=2)
+        tk.Label(rest_inputs, text="đến", bg="#23233a", fg="#e8e8f0").pack(side="left", padx=4)
         
-        self.dashboard_rest_max_ent = tk.Entry(rest_inputs, width=5, bd=1, relief="solid")
+        self.dashboard_rest_max_ent = tk.Entry(rest_inputs, width=5, bd=1, relief="flat", bg="#1a1a2e", fg="#e8e8f0", insertbackground="white")
         self.dashboard_rest_max_ent.insert(0, str(config['rest_max']))
         self.dashboard_rest_max_ent.pack(side="left")
         self.dashboard_rest_max_ent.bind("<FocusOut>", lambda e: save_dash_loop())
         
-        tk.Label(self.dash_sched_frame, text="Khung giờ hoạt động:", bg="#ffffff", font=self.font_bold).grid(row=1, column=0, sticky="w", pady=2)
-        time_inputs = tk.Frame(self.dash_sched_frame, bg="#ffffff")
-        time_inputs.grid(row=1, column=1, sticky="w", padx=10, pady=2)
-        self.dashboard_time_start_ent = tk.Entry(time_inputs, width=6, bd=1, relief="solid")
+        tk.Label(self.dash_sched_frame, text="Khung giờ hoạt động:", bg="#23233a", fg="#9090b0", font=self.font_bold).grid(row=1, column=0, sticky="w", pady=4)
+        time_inputs = tk.Frame(self.dash_sched_frame, bg="#23233a")
+        time_inputs.grid(row=1, column=1, sticky="w", padx=10, pady=4)
+        self.dashboard_time_start_ent = tk.Entry(time_inputs, width=6, bd=1, relief="flat", bg="#1a1a2e", fg="#e8e8f0", insertbackground="white")
         self.dashboard_time_start_ent.insert(0, config['time_start'])
         self.dashboard_time_start_ent.pack(side="left")
         self.dashboard_time_start_ent.bind("<FocusOut>", lambda e: save_dash_loop())
         
-        tk.Label(time_inputs, text="đến", bg="#ffffff").pack(side="left", padx=2)
+        tk.Label(time_inputs, text="đến", bg="#23233a", fg="#e8e8f0").pack(side="left", padx=4)
         
-        self.dashboard_time_end_ent = tk.Entry(time_inputs, width=6, bd=1, relief="solid")
+        self.dashboard_time_end_ent = tk.Entry(time_inputs, width=6, bd=1, relief="flat", bg="#1a1a2e", fg="#e8e8f0", insertbackground="white")
         self.dashboard_time_end_ent.insert(0, config['time_end'])
         self.dashboard_time_end_ent.pack(side="left")
         self.dashboard_time_end_ent.bind("<FocusOut>", lambda e: save_dash_loop())
         
         self._update_scheduler_widgets_visibility()
-
+ 
         # 3. Quick Options
-        opts_group = tk.LabelFrame(left_col, text=" 💡 Tùy Chọn Đăng ", font=self.font_bold, bg="#ffffff", bd=1, relief="solid", padx=10, pady=10)
-        opts_group.pack(fill="x", pady=5)
+        opts_group = make_card(left_col, "Tùy Chọn Đăng", "💡")
         
-        tk.Checkbutton(opts_group, text="Bỏ qua video đã comment trước đó", variable=self.skip_commented_var, bg="#ffffff",
-                       command=lambda: self.db.set_skip_commented(self.skip_commented_var.get())).pack(anchor="w", pady=2)
-        tk.Checkbutton(opts_group, text="Tự động xóa video khỏi thư mục sau khi đăng thành công", variable=self.auto_delete_var, bg="#ffffff",
-                       command=self.toggle_auto_delete).pack(anchor="w", pady=2)
-
+        tk.Checkbutton(opts_group, text="Bỏ qua video đã comment trước đó", variable=self.skip_commented_var, bg="#23233a", fg="#e8e8f0", selectcolor="#1a1a2e", activebackground="#23233a", activeforeground="#e8e8f0", font=self.font_main,
+                       command=lambda: self.db.set_skip_commented(self.skip_commented_var.get())).pack(anchor="w", pady=3)
+        tk.Checkbutton(opts_group, text="Tự động xóa video khỏi thư mục sau khi đăng thành công", variable=self.auto_delete_var, bg="#23233a", fg="#e8e8f0", selectcolor="#1a1a2e", activebackground="#23233a", activeforeground="#e8e8f0", font=self.font_main,
+                       command=self.toggle_auto_delete).pack(anchor="w", pady=3)
+ 
         # 4. Shopee mode configuration
-        shopee_group = tk.LabelFrame(left_col, text=" 🛒 Rải Link Tiếp Thị Shopee ", font=self.font_bold, bg="#ffffff", fg="#e07b39", bd=1, relief="solid", padx=10, pady=10)
-        shopee_group.pack(fill="x", pady=5)
+        shopee_group = make_card(left_col, "Rải Link Tiếp Thị Shopee", "🛒")
         
         def on_shopee_toggle():
             self.db.set_shopee_mode(self.shopee_mode_var.get())
@@ -288,18 +308,20 @@ class App(tk.Tk):
             self._update_shopee_ui_state()
             
         tk.Checkbutton(shopee_group, text="Kích hoạt rải link affiliate Shopee", variable=self.shopee_mode_var,
-                       fg="#e07b39", selectcolor="#fff8f0", bg="#ffffff", font=self.font_bold,
-                       command=on_shopee_toggle).pack(anchor="w", pady=(0, 5))
+                       fg="#fb923c", selectcolor="#1a1a2e", bg="#23233a", font=self.font_bold,
+                       activebackground="#23233a", activeforeground="#fb923c",
+                       command=on_shopee_toggle).pack(anchor="w", pady=(0, 6))
                        
-        shopee_details = tk.Frame(shopee_group, bg="#ffffff")
+        shopee_details = tk.Frame(shopee_group, bg="#23233a")
         shopee_details.pack(fill="x", pady=2)
+        shopee_details.columnconfigure(1, weight=1)
         
         # File selector row
-        tk.Label(shopee_details, text="File sản phẩm:", bg="#ffffff", font=self.font_bold).grid(row=0, column=0, sticky="w", pady=4)
-        shopee_file_row = tk.Frame(shopee_details, bg="#ffffff")
+        tk.Label(shopee_details, text="File sản phẩm:", bg="#23233a", fg="#9090b0", font=self.font_bold).grid(row=0, column=0, sticky="w", pady=4)
+        shopee_file_row = tk.Frame(shopee_details, bg="#23233a")
         shopee_file_row.grid(row=0, column=1, sticky="w", padx=10, pady=4)
         
-        self.lbl_shopee_file = tk.Label(shopee_file_row, textvariable=self.shopee_file_path, bg="#ffffff", font=("Segoe UI", 8), fg="#555", width=20, anchor="w")
+        self.lbl_shopee_file = tk.Label(shopee_file_row, textvariable=self.shopee_file_path, bg="#23233a", font=("Segoe UI", 8), fg="#e8e8f0", width=18, anchor="w")
         self.lbl_shopee_file.pack(side="left")
         
         def pick_shopee_file():
@@ -317,21 +339,21 @@ class App(tk.Tk):
             else:
                 messagebox.showinfo("Chưa chọn file", "Bạn chưa chọn file Shopee nào.")
                 
-        btn_pick_sh = tk.Button(shopee_file_row, text="📂 Chọn", command=pick_shopee_file, font=("Segoe UI", 8), padx=5, pady=1)
+        btn_pick_sh = tk.Button(shopee_file_row, text="📂 Chọn", command=pick_shopee_file, font=("Segoe UI", 8), padx=6, pady=2)
         btn_pick_sh.pack(side="left", padx=2)
-        self.style_button(btn_pick_sh, "#e07b39", "#be5f23")
+        self.style_button(btn_pick_sh, "#fb923c", "#ea580c")
         
-        btn_open_sh = tk.Button(shopee_file_row, text="✏️ Sửa", command=open_shopee_file, font=("Segoe UI", 8), padx=5, pady=1)
+        btn_open_sh = tk.Button(shopee_file_row, text="✏️ Sửa", command=open_shopee_file, font=("Segoe UI", 8), padx=6, pady=2)
         btn_open_sh.pack(side="left")
-        self.style_button(btn_open_sh, "#5f6368", "#474a4d")
+        self.style_button(btn_open_sh, "#2e2e48", "#3f3f5f")
         
         # Groups dropdown row
-        tk.Label(shopee_details, text="Nhóm áp dụng:", bg="#ffffff", font=self.font_bold).grid(row=1, column=0, sticky="w", pady=4)
+        tk.Label(shopee_details, text="Nhóm áp dụng:", bg="#23233a", fg="#9090b0", font=self.font_bold).grid(row=1, column=0, sticky="w", pady=4)
         
         self.shopee_all_groups_var = tk.BooleanVar(value=self.db.get_shopee_all_groups())
         self.shopee_group_vars = {}
         
-        self.btn_shopee_groups = tk.Menubutton(shopee_details, text="Đang tải...", relief="raised", bd=1, bg="#ffffff", cursor="hand2", font=("Segoe UI", 8))
+        self.btn_shopee_groups = tk.Menubutton(shopee_details, text="Đang tải...", relief="flat", bg="#2e2e48", fg="#e8e8f0", activebackground="#3f3f5f", activeforeground="#e8e8f0", cursor="hand2", font=("Segoe UI", 8))
         self.btn_shopee_groups.grid(row=1, column=1, sticky="w", padx=10, pady=4)
         
         self.shopee_group_menu = tk.Menu(self.btn_shopee_groups, tearoff=0, postcommand=self.rebuild_shopee_group_menu)
@@ -342,23 +364,27 @@ class App(tk.Tk):
         self._shopee_file_btn = btn_pick_sh
         self._shopee_open_btn = btn_open_sh
         self._update_shopee_ui_state()
-
+ 
         # 5. Core start/stop control actions
-        buttons_frame = tk.Frame(left_col, bg=self.bg_color)
+        buttons_frame = tk.Frame(left_col, bg="#12121a")
         buttons_frame.pack(fill="x", pady=15)
         
-        self.btn_start = tk.Button(buttons_frame, text="▶ BẮT ĐẦU CHẠY TOOL", command=self.start_posting, font=("Segoe UI", 11, "bold"), pady=8)
-        self.btn_start.pack(fill="x", pady=3)
-        self.style_button(self.btn_start, "#27ae60", "#219653")
+        self.btn_start = tk.Button(buttons_frame, text="▶ BẮT ĐẦU CHẠY TOOL", command=self.start_posting, font=("Segoe UI", 11, "bold"), pady=10)
+        self.btn_start.pack(fill="x", pady=4)
+        self.style_button(self.btn_start, "#10b981", "#059669")
         
-        self.btn_stop = tk.Button(buttons_frame, text="■ DỪNG CHẠY", command=self.stop_posting, state="disabled", font=("Segoe UI", 11, "bold"), pady=8)
-        self.btn_stop.pack(fill="x", pady=3)
-        self.style_button(self.btn_stop, "#c0392b", "#a93226")
-
+        self.btn_stop = tk.Button(buttons_frame, text="■ DỪNG CHẠY", command=self.stop_posting, state="disabled", font=("Segoe UI", 11, "bold"), pady=10)
+        self.btn_stop.pack(fill="x", pady=4)
+        self.style_button(self.btn_stop, "#ef4444", "#dc2626")
+ 
         # Live log box (Right side)
-        log_header = tk.Frame(right_log_frame, bg="#f0f0f0", pady=5)
-        log_header.pack(fill="x")
-        tk.Label(log_header, text="📊 NHẬT KÝ HOẠT ĐỘNG THỜI GIAN THỰC", font=self.font_header, bg="#f0f0f0", fg="#333").pack(side="left", padx=10)
+        log_card = tk.Frame(right_log_frame, bg="#23233a", highlightbackground="#2e2e48", highlightthickness=1)
+        log_card.pack(fill="both", expand=True)
+        
+        log_header = tk.Frame(log_card, bg="#23233a", pady=6)
+        log_header.pack(fill="x", padx=10)
+        
+        tk.Label(log_header, text="🖥️ NHẬT KÝ HOẠT ĐỘNG THỜI GIAN THỰC", font=self.font_header, bg="#23233a", fg="#60a5fa").pack(side="left")
         
         def clear_console():
             self.log_text.configure(state="normal")
@@ -366,13 +392,23 @@ class App(tk.Tk):
             self.log_text.configure(state="disabled")
             self.log("Đã làm sạch ô log hiển thị.")
             
-        btn_clear_log = tk.Button(log_header, text="🗑️ Làm sạch log", command=clear_console, font=("Segoe UI", 8), padx=5, pady=2)
-        btn_clear_log.pack(side="right", padx=10)
-        self.style_button(btn_clear_log, "#5f6368", "#474a4d")
-
-        self.log_text = scrolledtext.ScrolledText(right_log_frame, font=("Consolas", 9), state="normal", wrap="word", bg="#202124", fg="#f1f3f4", insertbackground="white")
-        self.log_text.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+        btn_clear_log = tk.Button(log_header, text="🗑️ Làm sạch log", command=clear_console, font=("Segoe UI", 8), padx=6, pady=2)
+        btn_clear_log.pack(side="right")
+        self.style_button(btn_clear_log, "#2e2e48", "#3f3f5f")
+ 
+        self.log_text = scrolledtext.ScrolledText(
+            log_card, font=("Consolas", 9), state="normal", wrap="word",
+            bg="#0d0d18", fg="#e8e8f0", insertbackground="white", relief="flat"
+        )
+        self.log_text.pack(fill="both", expand=True, padx=2, pady=(0, 2))
         self.log_text.configure(state="disabled")
+        
+        # Configure tags for color-coding logs
+        self.log_text.tag_config("ok",   foreground="#4ade80")
+        self.log_text.tag_config("warn", foreground="#fb923c")
+        self.log_text.tag_config("err",  foreground="#f87171")
+        self.log_text.tag_config("info", foreground="#60a5fa")
+        self.log_text.tag_config("dim",  foreground="#9090b0")
 
     def _update_scheduler_widgets_visibility(self):
         # Only show rest and time constraints if loop mode is not 'once'
@@ -942,6 +978,14 @@ class App(tk.Tk):
     def backup_current_profile_ui(self):
         import zipfile
         
+        # Ensure backups directory exists
+        backups_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
+        if not os.path.exists(backups_dir):
+            try:
+                os.makedirs(backups_dir)
+            except Exception as e:
+                print(f"Error creating backups dir: {e}")
+        
         # Determine default backup filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_profile_name = "".join(c for c in self.profile_name if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
@@ -949,6 +993,7 @@ class App(tk.Tk):
         
         file_path = filedialog.asksaveasfilename(
             title="Chọn nơi lưu bản sao lưu",
+            initialdir=backups_dir,
             initialfile=default_filename,
             filetypes=[("ZIP files", "*.zip")],
             defaultextension=".zip"
@@ -990,8 +1035,17 @@ class App(tk.Tk):
     def restore_current_profile_ui(self):
         import zipfile
         
+        # Ensure backups directory exists
+        backups_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
+        if not os.path.exists(backups_dir):
+            try:
+                os.makedirs(backups_dir)
+            except Exception as e:
+                print(f"Error creating backups dir: {e}")
+                
         file_path = filedialog.askopenfilename(
             title="Chọn tệp sao lưu để khôi phục (.zip)",
+            initialdir=backups_dir,
             filetypes=[("ZIP files", "*.zip")]
         )
         
@@ -1732,7 +1786,7 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
         try:
             enabled = self.shopee_mode_var.get()
             state = "normal" if enabled else "disabled"
-            fg = "#333" if enabled else "#aaa"
+            fg = "#e8e8f0" if enabled else "#606080"
             self._shopee_file_btn.configure(state=state)
             self._shopee_open_btn.configure(state=state)
             self.lbl_shopee_file.configure(fg=fg)
@@ -1869,7 +1923,20 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
         if not hasattr(self, 'log_text'):
             return
 
-        self._log_buffer.append(msg)
+        # Determine tag dynamically
+        msg_lower = message.lower()
+        if any(x in msg_lower for x in ["[ok]", "thành công", "success", "✔", "[xong]", "hoàn thành"]):
+            tag = "ok"
+        elif any(x in msg_lower for x in ["[loi]", "lỗi", "error", "exception", "fail", "thất bại", "❌", "[err]", "không thể"]):
+            tag = "err"
+        elif any(x in msg_lower for x in ["[canh bao]", "cảnh báo", "warning", "⚠️", "[warn]", "bị khóa", "checkpoint"]):
+            tag = "warn"
+        elif any(x in msg_lower for x in ["[tin tuc]", "bắt đầu", "đang", "info", "[info]", "running", "chờ"]):
+            tag = "info"
+        else:
+            tag = "dim"
+
+        self._log_buffer.append((msg, tag))
         if not self._log_flush_scheduled:
             self._log_flush_scheduled = True
             self.after(100, self._flush_log_buffer)
@@ -1878,11 +1945,12 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
         self._log_flush_scheduled = False
         if not self._log_buffer:
             return
-        batch = "".join(self._log_buffer)
+        buffer_copy = list(self._log_buffer)
         self._log_buffer.clear()
         try:
             self.log_text.configure(state="normal")
-            self.log_text.insert("end", batch)
+            for msg, tag in buffer_copy:
+                self.log_text.insert("end", msg, tag)
             line_count = int(self.log_text.index("end-1c").split(".")[0])
             if line_count > 2000:
                 self.log_text.delete("1.0", f"{line_count - 2000}.0")
@@ -2617,7 +2685,7 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
         self.stop_flag = False
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
-        self.status_lbl.configure(text="● HỆ THỐNG ĐANG HOẠT ĐỘNG", fg="#27ae60", bg="#d4efdf")
+        self.status_lbl.configure(text="⬤ HỆ THỐNG ĐANG HOẠT ĐỘNG", fg="#10b981", bg="#1b3024")
         threading.Thread(target=self._start_posting_thread, daemon=True).start()
 
     def stop_posting(self):
@@ -3068,7 +3136,7 @@ if ($res -eq [System.Windows.Forms.DialogResult]::OK) {{
             self.stop_flag = True
             self.btn_start.configure(state="normal")
             self.btn_stop.configure(state="disabled")
-            self.status_lbl.configure(text="● HỆ THỐNG ĐANG DỪNG", fg="#c0392b", bg="#fadbd8")
+            self.status_lbl.configure(text="⬤ HỆ THỐNG ĐANG DỪNG", fg="#ef4444", bg="#2f1a1a")
 
     def _process_single_page(self, page, run_mode, skip_commented, auto_delete, is_last_for_profile=True):
         # Fallback method, not normally executed as tasks are outsourced to page_worker.py

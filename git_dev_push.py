@@ -38,7 +38,10 @@ ALLOWED_FILES = [
     "AutoDangBai_User_Setup/Chay_Tool.bat",
     "AutoDangBai_User_Setup/HUONG_DAN_CAI_DAT.txt",
     "AutoDangBai_User_Setup/requirements.txt",
-    "AutoDangBai_User_Setup/launcher_git.py"
+    "AutoDangBai_User_Setup/launcher_git.py",
+    
+    # Thư mục Backup
+    "backups/README.md"
 ]
 
 def run_clean_push():
@@ -58,8 +61,17 @@ def run_clean_push():
         
         # 2. Chi add cac file trong danh sach cho phep
         print("[+] Buoc 2: Them cac file quan trong vao danh sach phat hanh...")
+        
+        # Quét động các tệp tin trong thư mục backups để đưa vào danh sách add
+        files_to_add = list(ALLOWED_FILES)
+        if os.path.exists("backups") and os.path.isdir("backups"):
+            for item in os.listdir("backups"):
+                item_path = os.path.join("backups", item).replace("\\", "/")
+                if os.path.isfile(item_path) and item_path not in files_to_add:
+                    files_to_add.append(item_path)
+
         added_count = 0
-        for file_path in ALLOWED_FILES:
+        for file_path in files_to_add:
             if os.path.exists(file_path):
                 # Thay the dau gach cheo nguoc de tuong thich Git
                 normalized_path = file_path.replace("\\", "/")

@@ -1922,6 +1922,8 @@ class FacebookAutomator:
         If not, opens profile switcher and switches profile to page_name.
         Handles session loss reconnect.
         """
+        if page_name:
+            page_name = page_name.strip()
         try:
             try:
                 self._safe_get("https://www.facebook.com")
@@ -2419,14 +2421,14 @@ class FacebookAutomator:
                 if not reel_url:
                     print("[Automator] [GetReelURLBulk] Clipboard strategy failed/skipped. Trying View button + New tab...")
                     view_selectors = [
-                        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
-                        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
-                        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view')]",
-                        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem')]",
-                        "//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
-                        "//div[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
-                        "//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
-                        "//div[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view')]",
+                        "//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem')]",
+                        "//span[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//div[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'view') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//span[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
+                        "//div[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'xem') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'facebook')]",
                         "//a[contains(@href, 'facebook.com/') or contains(@href, '/reel/') or contains(@href, '/videos/') or contains(@href, '/posts/')]"
                     ]
                     view_btn = None
@@ -2446,11 +2448,11 @@ class FacebookAutomator:
 
                     if view_btn:
                         try:
-                            # Try to get href directly first
+                            # Try to get href directly first (strictly check that it is a valid public post link)
                             try:
                                 href = view_btn.get_attribute("href")
-                                if href and "facebook.com" in href:
-                                    reel_url = href
+                                if href and is_valid_fb_post_link(href):
+                                    reel_url = href.replace("business.facebook.com", "www.facebook.com")
                                     print(f"[Automator] [GetReelURLBulk] ✓ Resolved directly from href: {reel_url}")
                             except: pass
 
@@ -2471,8 +2473,17 @@ class FacebookAutomator:
                                 if new_handles:
                                     orig_window = self.driver.current_window_handle
                                     self.driver.switch_to.window(new_handles[0])
-                                    time.sleep(2)
-                                    reel_url = self.driver.current_url
+                                    
+                                    # Wait in a loop up to 8s (16 * 0.5s) for the redirect to resolve to a valid facebook post link
+                                    resolved_url = None
+                                    for _ in range(16):
+                                        curr = self.driver.current_url or ""
+                                        if "facebook.com" in curr and "business.facebook.com" not in curr and curr != "about:blank":
+                                            resolved_url = curr
+                                            break
+                                        time.sleep(0.5)
+                                    
+                                    reel_url = resolved_url or self.driver.current_url
                                     print(f"[Automator] [GetReelURLBulk] ✓ Resolved via New Tab: {reel_url}")
                                     self.driver.close()
                                     self.driver.switch_to.window(orig_window)

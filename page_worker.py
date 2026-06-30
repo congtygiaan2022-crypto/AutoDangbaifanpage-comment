@@ -196,7 +196,7 @@ def run_worker(job_path):
                 automator = None
                 time.sleep(3)
 
-            page_name = page.get('name', 'Page_Không_Tên')
+            page_name = page.get('name', 'Page_Không_Tên').strip()
             stt = f"[{idx}/{total_pages}]"
             unposted_files = page.get('unposted_files', [])  # list of [folder, filename]
             to_comment_historic = page.get('to_comment_historic', [])
